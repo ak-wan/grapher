@@ -170,8 +170,8 @@ func (g *Graph[T]) GetNode(id string) (*Node[T], error) {
 	return node, nil
 }
 
-// GetEdges 获取节点的出边
-func (g *Graph[T]) GetEdges(from string) ([]*Edge, error) {
+// GetOutEdges 获取节点的出边
+func (g *Graph[T]) GetOutEdges(from string) ([]*Edge, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
@@ -197,4 +197,20 @@ func (g *Graph[T]) addEdgeToIndex(from, to string, edge *Edge) {
 		g.in[to] = make(map[string]*Edge)
 	}
 	g.in[to][from] = edge
+}
+
+// 添加获取入边方法
+func (g *Graph[T]) GetInEdges(to string) ([]*Edge, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if _, exists := g.nodes[to]; !exists {
+		return nil, fmt.Errorf("%w: %s", ErrNodeNotFound, to)
+	}
+
+	edges := make([]*Edge, 0, len(g.in[to]))
+	for _, e := range g.in[to] {
+		edges = append(edges, e)
+	}
+	return edges, nil
 }

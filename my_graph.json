@@ -5,7 +5,7 @@
       "data": {
         "name": "Complex Data",
         "value": 100
-      }
+      } 
     },
     {
       "id": "5",
@@ -48,7 +48,7 @@
     },
     {
       "from": "2",
-      "to": "4",
+      "to": "4",  
       "weight": 2.5
     },
     {

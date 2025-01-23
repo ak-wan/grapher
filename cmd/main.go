@@ -39,7 +39,7 @@ func main() {
 	fmt.Println("Node 1 data:", node.Data)
 
 	// Get neighbors
-	neighbors, _ := g.GetEdges("1")
+	neighbors, _ := g.GetOutEdges("1")
 	fmt.Println("Node 1 neighbors:", neighbors)
 
 	// Save to file

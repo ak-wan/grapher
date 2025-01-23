@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 )
-
+		
 func TestGraph(t *testing.T) {
 	t.Run("测试操作节点", testNodeOperations)
 	t.Run("测试边操作", testEdgeOperations)
@@ -59,7 +59,7 @@ func testNodeOperations(t *testing.T) {
 		if err := g.RemoveNode("A"); err != nil {
 			t.Fatal(err)
 		}
-		if edges, _ := g.GetEdges("B"); len(edges) > 0 {
+		if edges, _ := g.GetOutEdges("B"); len(edges) > 0 {
 			t.Error("Related edges not cleaned up")
 		}
 	})
@@ -217,7 +217,7 @@ func testPersistence(t *testing.T) {
 		}
 
 		// 验证边
-		edges, _ := loaded.GetEdges("A")
+		edges, _ := loaded.GetOutEdges("A")
 		if len(edges) != 1 || edges[0].Weight != 3.14 {
 			t.Error("Edge data mismatch")
 		}

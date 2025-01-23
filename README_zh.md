@@ -6,6 +6,7 @@
 [中文](README_zh.md)|[English](README.md)
 
 轻量化内存图数据库基础组件，提供图存储、遍历算法和类Cypher/OrientSQL查询引擎
+项目全部使用Copilot构建，以下特性不保真，请甄别使用。
 
 ## 功能特性
 

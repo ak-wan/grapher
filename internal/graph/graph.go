@@ -16,8 +16,10 @@ var (
 
 // Node 表示图节点，支持泛型数据
 type Node[T any] struct {
-	ID   string `json:"id"`
-	Data T      `json:"data"`
+	ID         string `json:"id"`
+	Data       T      `json:"data"`
+	Labels     []string
+	Properties map[string]interface{}
 }
 
 // Edge 表示有向带权边
@@ -168,6 +170,18 @@ func (g *Graph[T]) GetNode(id string) (*Node[T], error) {
 		return nil, fmt.Errorf("%w: %s", ErrNodeNotFound, id)
 	}
 	return node, nil
+}
+
+// AllNodes 返回全部节点
+func (g *Graph[T]) AllNodes() []*Node[T] {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	nodes := make([]*Node[T], 0, len(g.nodes))
+	for _, node := range g.nodes {
+		nodes = append(nodes, node)
+	}
+	return nodes
 }
 
 // GetOutEdges 获取节点的出边

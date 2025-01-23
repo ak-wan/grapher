@@ -6,6 +6,7 @@
 [中文](README_zh.md)|[English](README.md)
 
 Lightweight in-memory graph database toolkit with storage, algorithms & Cypher-like queries
+The entire project is built using Copilot, and the following features are not guaranteed. Please use with caution.
 
 ## Features
 

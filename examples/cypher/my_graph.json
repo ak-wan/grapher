@@ -1,0 +1,65 @@
+{
+  "nodes": [
+    {
+      "id": "A",
+      "data": "Node A"
+    },
+    {
+      "id": "B",
+      "data": "Node B"
+    },
+    {
+      "id": "C",
+      "data": "Node C"
+    },
+    {
+      "id": "D",
+      "data": "Node D"
+    },
+    {
+      "id": "E",
+      "data": "Node E"
+    },
+    {
+      "id": "F",
+      "data": "Node F"
+    }
+  ],
+  "edges": [
+    {
+      "from": "A",
+      "to": "B",
+      "weight": 1
+    },
+    {
+      "from": "A",
+      "to": "D",
+      "weight": 1
+    },
+    {
+      "from": "B",
+      "to": "C",
+      "weight": 1
+    },
+    {
+      "from": "C",
+      "to": "D",
+      "weight": 1
+    },
+    {
+      "from": "D",
+      "to": "E",
+      "weight": 1
+    },
+    {
+      "from": "E",
+      "to": "F",
+      "weight": 1
+    },
+    {
+      "from": "C",
+      "to": "F",
+      "weight": 1
+    }
+  ]
+}

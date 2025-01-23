@@ -97,7 +97,7 @@ func TestDFSOutgoingFull(t *testing.T) {
 	validPaths := [][]string{
 		{"A", "D", "E", "F", "B", "C"},
 	}
-	
+
 	if !isValidDFSPath(result, validPaths) {
 		t.Errorf("无效的DFS顺序: %v", result)
 	}
@@ -124,7 +124,6 @@ func TestDFSIncomingPath(t *testing.T) {
 	validPaths := [][]string{
 		{"F", "E", "D", "C", "B"},
 		{"F", "C", "B", "E", "D"},
-
 	}
 	if !isValidDFSPath(result, validPaths) {
 		t.Errorf("无效的逆向路径: %v", result)

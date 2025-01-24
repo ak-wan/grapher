@@ -3,29 +3,33 @@ package cypher
 import (
 	"fmt"
 	"grapher/internal/graph"
+	"grapher/internal/traverse"
 	"strconv"
 )
 
-// ExecuteQuery 执行 Cypher 查询并返回结果（支持泛型图结构）
+// ExecuteQuery 执行查询并返回结果（基于DFS迭代器）
 func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interface{}, error) {
 	results := []map[string]interface{}{}
-
-	// 获取查询的根节点（单个查询）
 	sq := q.Root
 
-	// 处理所有 MATCH 子句（目前只处理第一个 MATCH）
+	// 处理MATCH子句
 	if len(sq.Reading) == 0 {
 		return nil, fmt.Errorf("no MATCH clause found")
 	}
 	matchClause := sq.Reading[0]
 
-	// 提取匹配模式中的变量绑定
-	var startVar, endVar Variable
-	var edgePattern EdgePattern
+	// 解析模式中的变量绑定
+	var (
+		startVar    Variable
+		endVar      Variable
+		edgePattern EdgePattern
+	)
+
+	// 提取模式中的节点和边信息
 	for _, mp := range matchClause.Pattern {
 		for _, elem := range mp.Elements {
 			switch v := elem.(type) {
-			case *NodePattern: // 指针类型
+			case *NodePattern:
 				if v.Variable != nil {
 					if startVar == "" {
 						startVar = *v.Variable
@@ -35,219 +39,166 @@ func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interf
 				}
 			case *EdgePattern:
 				edgePattern = *v
-			default:
-				return nil, fmt.Errorf("unsupported pattern element type: %T", elem)
 			}
 		}
 	}
 
 	// 查找起始节点
-	nodePattern, ok := matchClause.Pattern[0].Elements[0].(*NodePattern)
-	if !ok {
-		return nil, fmt.Errorf("expected NodePattern but got %T", matchClause.Pattern[0].Elements[0])
-	}
-	startNodes, err := findNodesByPattern(g, *nodePattern)
+	startNodes, err := findStartNodes(g, matchClause)
 	if err != nil {
 		return nil, err
 	}
 
 	// 遍历所有起始节点
 	for _, startNode := range startNodes {
-		paths := traversePaths(g, startNode, edgePattern)
+		// 设置深度范围
+		minHops := 1 // Cypher默认至少1跳
+		if edgePattern.MinHops != nil {
+			minHops = *edgePattern.MinHops
+		}
+		maxHops := -1
+		if edgePattern.MaxHops != nil {
+			maxHops = *edgePattern.MaxHops
+		}
 
-		// 收集结果并去重
+		// 配置DFS参数
+		opts := []traverse.DFSOption[T]{ // 根据泛型类型具体化
+			traverse.WithDirection[T](convertDirection(edgePattern.Direction)),
+			traverse.WithMaxDepth[T](maxHops),
+		}
+
+		// 创建DFS迭代器
+		dfs, err := traverse.NewDFS(g, startNode.ID, opts...)
+		if err != nil {
+			return nil, err
+		}
+
+		// 收集结果
 		seen := make(map[interface{}]bool)
-		for _, path := range paths {
-			endNode := path.End()
-
-			// 生成结果键
-			resultKey := struct {
-				Start interface{}
-				End   interface{}
-			}{startNode.Data, endNode.Data}
-
-			if seen[resultKey] {
-				continue
+		err = dfs.Iterate(func(n *graph.Node[T]) error {
+			// 过滤跳数范围
+			currentDepth := dfs.CurDepth()
+			if currentDepth < minHops || (maxHops != -1 && currentDepth > maxHops) {
+				return nil
 			}
-			seen[resultKey] = true
 
+			// 结果去重
+			if seen[n.Data] {
+				return nil
+			}
+			seen[n.Data] = true
+
+			// 构建结果项
 			result := make(map[string]interface{})
 			if startVar != "" {
 				result[string(startVar)] = startNode.Data
 			}
 			if endVar != "" {
-				result[string(endVar)] = endNode.Data
+				result[string(endVar)] = n.Data
 			}
 			results = append(results, result)
+			return nil
+		})
+
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	return results, nil
 }
 
-// 辅助结构体（使用泛型）
-type Path[T comparable] struct {
-	Current  *graph.Node[T]
-	Previous *Path[T]
-	Depth    int
-}
+// 辅助函数 ---------------------------------------------------
 
-func (p *Path[T]) End() *graph.Node[T] {
-	if p.Previous == nil {
-		return p.Current
+// 转换方向枚举
+func convertDirection(d EdgeDirection) traverse.Direction {
+	switch d {
+	case EdgeRight:
+		return traverse.Outgoing
+	case EdgeLeft:
+		return traverse.Incoming
+	default:
+		return traverse.Outgoing
 	}
-	return p.Previous.End()
 }
 
-// 查找匹配节点（泛型版本）
-func findNodesByPattern[T comparable](g *graph.Graph[T], np NodePattern) ([]*graph.Node[T], error) {
-	nodes := g.AllNodes()
-	filtered := make([]*graph.Node[T], 0)
+// 查找起始节点
+func findStartNodes[T comparable](g *graph.Graph[T], clause ReadingClause) ([]*graph.Node[T], error) {
+	if len(clause.Pattern) == 0 {
+		return nil, fmt.Errorf("no pattern found in MATCH clause")
+	}
 
-	for _, node := range nodes {
+	// 获取第一个节点模式
+	firstElem := clause.Pattern[0].Elements[0]
+	nodePattern, ok := firstElem.(*NodePattern)
+	if !ok {
+		return nil, fmt.Errorf("expected NodePattern as first element")
+	}
+
+	return findNodesByPattern(g, *nodePattern)
+}
+
+func findNodesByPattern[T comparable](g *graph.Graph[T], np NodePattern) ([]*graph.Node[T], error) {
+	allNodes := g.AllNodes()
+	matched := make([]*graph.Node[T], 0)
+
+	fmt.Printf("\n[DEBUG] Matching node pattern: Labels=%v, Properties=%v\n", np.Labels, np.Properties)
+
+NODE_LOOP:
+	for _, node := range allNodes {
+		fmt.Printf("\n[DEBUG] Checking node %s:\n", node.ID)
+		fmt.Printf("  - Labels: %v\n", node.Labels)
+		fmt.Printf("  - Properties: %v\n", node.Data)
+
 		// 检查标签
-		if len(np.Labels) > 0 && !hasAllLabels(node, np.Labels) {
-			continue
+		if len(np.Labels) > 0 {
+			if !hasAllLabels(node, np.Labels) {
+				fmt.Printf("  ✗ Label mismatch\n")
+				continue
+			}
+			fmt.Printf("  ✓ Labels matched\n")
 		}
 
 		// 检查属性
-		if match, err := matchProperties(node, np.Properties); err != nil {
-			return nil, err
-		} else if !match {
-			continue
-		}
-
-		filtered = append(filtered, node)
-	}
-
-	return filtered, nil
-}
-
-// 路径遍历核心逻辑（泛型版本）
-func traversePaths[T comparable](g *graph.Graph[T], start *graph.Node[T], ep EdgePattern) []*Path[T] {
-	queue := []*Path[T]{{Current: start, Depth: 0}}
-	results := []*Path[T]{}
-
-	// 处理跳数范围
-	minHops := 1
-	if ep.MinHops != nil {
-		minHops = *ep.MinHops
-	}
-
-	maxHops := -1 // 无限
-	if ep.MaxHops != nil {
-		maxHops = *ep.MaxHops
-	}
-
-	for len(queue) > 0 {
-		currentPath := queue[0]
-		queue = queue[1:]
-
-		// 检查是否满足终止条件
-		if currentPath.Depth >= minHops && (maxHops == -1 || currentPath.Depth <= maxHops) {
-			results = append(results, currentPath)
-		}
-
-		// 超过最大深度则停止
-		if maxHops != -1 && currentPath.Depth >= maxHops {
-			continue
-		}
-
-		// 获取当前节点的出边（根据方向）
-		var edges []*graph.Edge
-		switch ep.Direction {
-		case EdgeRight:
-			edges, _ = g.GetOutEdges(currentPath.Current.ID)
-		case EdgeLeft:
-			edges, _ = g.GetInEdges(currentPath.Current.ID)
-		default:
-			outEdges, err := g.GetOutEdges(currentPath.Current.ID)
-			if err != nil {
-				continue
+		for k, expr := range np.Properties {
+			nodeVal, exists := node.Properties[k]
+			if !exists {
+				fmt.Printf("  ✗ Property '%s' not found\n", k)
+				continue NODE_LOOP
 			}
-			inEdges, err := g.GetInEdges(currentPath.Current.ID)
-			if err != nil {
-				continue
-			}
-			edges = append(outEdges, inEdges...)
-		}
 
-		// 遍历边
-		for _, edge := range edges {
-			var nextNode *graph.Node[T]
-			var err error
-
-			if edge.From == currentPath.Current.ID {
-				nextNode, err = g.GetNode(edge.To)
-				if err != nil {
-					continue
+			switch v := expr.(type) {
+			case StrLiteral:
+				expected := string(v)
+				actual := fmt.Sprint(nodeVal)
+				if actual != expected {
+					fmt.Printf("  ✗ Property '%s' value mismatch: expected '%s', got '%s'\n", k, expected, actual)
+					continue NODE_LOOP
 				}
-			} else {
-				nextNode, err = g.GetNode(edge.From)
-				if err != nil {
-					continue
+				fmt.Printf("  ✓ Property '%s' matched ('%s')\n", k, expected)
+			case IntegerLiteral:
+				expected := int(v)
+				actual, err := strconv.Atoi(fmt.Sprint(nodeVal))
+				if err != nil || actual != expected {
+					fmt.Printf("  ✗ Property '%s' value mismatch: expected %d, got %v\n", k, expected, nodeVal)
+					continue NODE_LOOP
 				}
+				fmt.Printf("  ✓ Property '%s' matched (%d)\n", k, expected)
+			default:
+				fmt.Printf("  ✗ Unsupported property type: %T\n", expr)
+				continue NODE_LOOP
 			}
-
-			// 防止循环（检查当前路径是否包含该节点）
-			if pathContains(currentPath, nextNode) {
-				continue
-			}
-
-			queue = append(queue, &Path[T]{
-				Current:  nextNode,
-				Previous: currentPath,
-				Depth:    currentPath.Depth + 1,
-			})
 		}
+
+		matched = append(matched, node)
+		fmt.Printf("  ✓ Node matched\n")
 	}
 
-	return results
+	fmt.Printf("\n[DEBUG] Total matched nodes: %d\n", len(matched))
+	return matched, nil
 }
 
-// 辅助函数 ---------------------------------------------------
-
-// 检查路径是否包含节点
-func pathContains[T comparable](path *Path[T], node *graph.Node[T]) bool {
-	for p := path; p != nil; p = p.Previous {
-		if p.Current.ID == node.ID {
-			return true
-		}
-	}
-	return false
-}
-
-// 属性匹配（支持多种表达式类型）
-func matchProperties[T comparable](n *graph.Node[T], props map[string]Expr) (bool, error) {
-	for key, expr := range props {
-		// 获取节点属性值
-		nodeVal, ok := n.Properties[key]
-		if !ok {
-			return false, nil
-		}
-
-		// 表达式求值
-		switch v := expr.(type) {
-		case StrLiteral:
-			if nodeVal != string(v) {
-				return false, nil
-			}
-		case IntegerLiteral:
-			num, err := strconv.Atoi(fmt.Sprint(nodeVal))
-			if err != nil || num != int(v) {
-				return false, nil
-			}
-		case Variable:
-			// 变量需要从上下文中获取值（此处简化处理）
-			return false, fmt.Errorf("variable properties not supported yet")
-		default:
-			return false, fmt.Errorf("unsupported property type: %T", expr)
-		}
-	}
-	return true, nil
-}
-
-// 标签检查（假设graph.Node有Labels字段）
+// 标签检查
 func hasAllLabels[T comparable](n *graph.Node[T], labels []string) bool {
 	for _, l := range labels {
 		if !contains(n.Labels, l) {
@@ -257,7 +208,7 @@ func hasAllLabels[T comparable](n *graph.Node[T], labels []string) bool {
 	return true
 }
 
-// 通用辅助函数
+// 通用包含检查
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {

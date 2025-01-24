@@ -248,25 +248,10 @@ func Lookup(ident string) Token {
 	return IDENT
 }
 
-// Pos specifies the line and character position of a token.
-// The Char and Line are both zero-based indexes.
+// Pos 指定了标记的行和字符位置。
 type Pos struct {
-	Line      int // 当前行号（从1开始）
-	Column    int // 当前列号（从1开始）
-	Offset    int // 字节偏移量（从0开始）
-	EndLine   int
-	EndColumn int
-	EndOffset int
+    Line   int // 行号（从1开始）
+    Column int // 列号（从1开始）
+    Offset int // 字节偏移量（从0开始）
 }
 
-// mergePos 合并两个连续字符的位置范围
-func mergePos(start, end Pos) Pos {
-	return Pos{
-		Line:      start.Line,
-		Column:    start.Column,
-		Offset:    start.Offset,
-		EndLine:   end.Line,
-		EndColumn: end.Column + 1, // 结束列是 ] 的下一个位置
-		EndOffset: end.Offset + 1,
-	}
-}

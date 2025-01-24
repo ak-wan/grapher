@@ -3,6 +3,7 @@ package cypher
 import (
 	"bytes"
 	"fmt"
+	"strings"
 )
 
 // Query represents the Cypher query root element.
@@ -28,23 +29,23 @@ func (sq SingleQuery) String() string {
 	var buf bytes.Buffer
 
 	for _, r := range sq.Reading {
-		_, _ = buf.WriteString(r.String())
+		buf.WriteString(r.String())
 	}
 
-	_, _ = buf.WriteString(" RETURN ")
+	buf.WriteString(" RETURN ")
 
 	if sq.Distinct {
-		_, _ = buf.WriteString("DISTINCT ")
+		buf.WriteString("DISTINCT ")
 	}
 
 	for _, i := range sq.ReturnItems {
-		_, _ = buf.WriteString(i.String())
+		buf.WriteString(i.String())
 	}
 
 	if len(sq.Order) > 0 {
-		_, _ = buf.WriteString(" ORDER BY ")
+		buf.WriteString(" ORDER BY ")
 		for _, o := range sq.Order {
-			_, _ = buf.WriteString(o.String())
+			buf.WriteString(o.String())
 		}
 	}
 
@@ -64,15 +65,15 @@ func (rc ReadingClause) String() string {
 	var buf bytes.Buffer
 
 	if rc.OptionalMatch {
-		_, _ = buf.WriteString(" OPTIONAL ")
+		buf.WriteString(" OPTIONAL ")
 	}
 
 	for _, p := range rc.Pattern {
-		_, _ = buf.WriteString(p.String())
+		buf.WriteString(p.String())
 	}
 
 	if w := rc.Where; w != nil {
-		_, _ = buf.WriteString((*w).String())
+		buf.WriteString((*w).String())
 	}
 
 	return buf.String()
@@ -90,12 +91,12 @@ func (mp MatchPattern) String() string {
 	buf.WriteString("MATCH ")
 
 	if mp.Variable != nil {
-		_, _ = buf.WriteString((*mp.Variable).String())
-		_, _ = buf.WriteString(" = ")
+		buf.WriteString((*mp.Variable).String())
+		buf.WriteString(" = ")
 	}
 
 	for _, e := range mp.Elements {
-		_, _ = buf.WriteString(e.String())
+		buf.WriteString(e.String())
 	}
 
 	return buf.String()
@@ -120,30 +121,29 @@ type NodePattern struct {
 func (np NodePattern) String() string {
 	var buf bytes.Buffer
 
-	_, _ = buf.WriteRune('(')
+	buf.WriteRune('(')
 
 	if np.Variable != nil {
-		_, _ = buf.WriteString((*np.Variable).String())
+		buf.WriteString((*np.Variable).String())
 	}
 
 	for _, l := range np.Labels {
-		_, _ = buf.WriteString(" :")
-		_, _ = buf.WriteString(l)
+		buf.WriteString(" :")
+		buf.WriteString(l)
 	}
 
-	_, _ = buf.WriteRune(')')
+	buf.WriteRune(')')
 
 	return buf.String()
 }
 
-// EdgePattern ...
 type EdgePattern struct {
-	Variable   *string
-	Labels     []string
-	Properties map[string]Expr
-	MinHops    *int
-	MaxHops    *int
-	Direction  EdgeDirection
+	Direction  EdgeDirection   // 方向（->, <-）
+	Variable   *string         // 关系变量（可选）
+	RelTypes   []string        // 关系类型列表（如 ["KNOWS"]）
+	Properties map[string]Expr // 属性键值对（可选）
+	MinHops    *int            // 最小跳数（可变长度路径）
+	MaxHops    *int            // 最大跳数（可变长度路径）
 }
 
 // Var ...
@@ -156,49 +156,47 @@ func (ep EdgePattern) String() string {
 
 	switch ep.Direction {
 	case EdgeRight, EdgeUndefined:
-		_, _ = buf.WriteRune('-')
+		buf.WriteRune('-')
 	case EdgeLeft, EdgeOutgoing:
-		_, _ = buf.WriteString("<-")
+		buf.WriteString("<-")
 	}
 
-	_, _ = buf.WriteRune('[')
+	buf.WriteRune('[')
 
 	if ep.Variable != nil {
-		_, _ = buf.WriteString(*ep.Variable)
+		buf.WriteString(*ep.Variable)
 	}
 
-	for i, l := range ep.Labels {
-		if i > 0 {
-			_, _ = buf.WriteString(" | ")
-		}
-		_, _ = buf.WriteRune(':')
-		_, _ = buf.WriteString(l)
+	// 添加关系类型
+	if len(ep.RelTypes) > 0 {
+		buf.WriteString(":")
+		buf.WriteString(strings.Join(ep.RelTypes, "|"))
 	}
 
 	if len(ep.Properties) > 0 {
-		_, _ = buf.WriteRune('{')
+		buf.WriteRune('{')
 
 		var next bool
 		for p, v := range ep.Properties {
 			if next {
-				_, _ = buf.WriteRune(',')
+				buf.WriteRune(',')
 			}
-			_, _ = buf.WriteString(p)
-			_, _ = buf.WriteRune(':')
-			_, _ = buf.WriteString(v.String())
+			buf.WriteString(p)
+			buf.WriteRune(':')
+			buf.WriteString(v.String())
 			next = true
 		}
 
-		_, _ = buf.WriteRune('}')
+		buf.WriteRune('}')
 	}
 
-	_, _ = buf.WriteRune(']')
+	buf.WriteRune(']')
 
 	switch ep.Direction {
 	case EdgeLeft, EdgeUndefined:
-		_, _ = buf.WriteRune('-')
+		buf.WriteRune('-')
 	case EdgeRight, EdgeOutgoing:
-		_, _ = buf.WriteString("->")
+		buf.WriteString("->")
 	}
 
 	return buf.String()

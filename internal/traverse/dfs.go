@@ -6,6 +6,8 @@ import (
 )
 
 // 完善后的DFS实现
+// 添加类型定义
+type DFSOption[T comparable] func(*DFS[T])
 
 type stackItem[T any] struct {
 	node  *graph.Node[T]
@@ -21,7 +23,7 @@ type DFS[T comparable] struct {
 }
 
 // NewDFS 创建DFS迭代器
-func NewDFS[T comparable](g *graph.Graph[T], startID string, opts ...func(*DFS[T])) (*DFS[T], error) {
+func NewDFS[T comparable](g *graph.Graph[T], startID string, opts ...DFSOption[T]) (*DFS[T], error) {
 	sn, err := g.GetNode(startID)
 	if err != nil {
 		return nil, err
@@ -42,15 +44,14 @@ func NewDFS[T comparable](g *graph.Graph[T], startID string, opts ...func(*DFS[T
 	return dfs, nil
 }
 
-// 配置方向函数
-func WithDirection[T comparable](d Direction) func(*DFS[T]) {
+// 修改选项函数签名
+func WithDirection[T comparable](d Direction) DFSOption[T] {
 	return func(dfs *DFS[T]) {
 		dfs.direction = d
 	}
 }
 
-// 配置深度函数
-func WithMaxDepth[T comparable](depth int) func(*DFS[T]) {
+func WithMaxDepth[T comparable](depth int) DFSOption[T] {
 	return func(dfs *DFS[T]) {
 		dfs.maxDepth = depth
 	}
@@ -59,6 +60,14 @@ func WithMaxDepth[T comparable](depth int) func(*DFS[T]) {
 // 核心方法实现
 func (d *DFS[T]) HasNext() bool {
 	return len(d.stack) > 0
+}
+
+// 获取当前遍历深度
+func (d *DFS[T]) CurDepth() int {
+	if len(d.stack) == 0 {
+		return -1
+	}
+	return d.stack[len(d.stack)-1].depth
 }
 
 func (d *DFS[T]) Next() *graph.Node[T] {

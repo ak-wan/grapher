@@ -219,56 +219,39 @@ func (p *Parser) ScanMatchPattern() (*MatchPattern, error) {
 	return mp, nil
 }
 
-// ScanPatternElements ...
-func (p *Parser) ScanPatternElements() (pe []PatternElement, err error) {
-	var node *NodePattern
-	numParens := 0
-	for {
-		node, err = p.ScanNodePattern()
-		if err != nil {
-			return nil, err
-		}
-		if node == nil {
-			// might be only parens around the actual match, lets try...
-			if tok, pos, lit := p.ScanIgnoreWhitespace(); tok == LPAREN {
-				numParens++
-			} else {
-				return nil, newParseError(tokstr(tok, lit), []string{"("}, pos)
-			}
-		} else {
-			break
-		}
+// ScanPatternElements 解析模式链（如 (A)-[rel]->(B)-[rel2]->(C)）
+func (p *Parser) ScanPatternElements() ([]PatternElement, error) {
+	var elements []PatternElement
+
+	// 解析第一个节点
+	node, err := p.ScanNodePattern()
+	if err != nil || node == nil {
+		return nil, fmt.Errorf("expected node pattern")
 	}
+	elements = append(elements, node)
 
-	pe = []PatternElement{node}
-
+	// 循环解析关系-节点对
 	for {
+		// 检查是否有关系模式
 		edge, err := p.ScanEdgePattern()
 		if err != nil {
 			return nil, err
 		} else if edge == nil {
-			break
-		} else {
-			pe = append(pe, edge)
+			break // 无更多关系模式
 		}
-		node, err = p.ScanNodePattern()
+		elements = append(elements, edge)
+
+		// 解析下一个节点
+		node, err := p.ScanNodePattern()
 		if err != nil {
 			return nil, err
 		} else if node == nil {
-			break
-		} else {
-			pe = append(pe, node)
+			return nil, fmt.Errorf("expected node after relationship")
 		}
+		elements = append(elements, node)
 	}
 
-	// need to close all open parens
-	for i := 0; i < numParens; i++ {
-		if tok, pos, lit := p.ScanIgnoreWhitespace(); tok != RPAREN {
-			return nil, newParseError(tokstr(tok, lit), []string{")"}, pos)
-		}
-	}
-
-	return pe, nil
+	return elements, nil
 }
 
 // ScanNodePattern returns a NodePattern if possible to consume a complete valid node.
@@ -311,6 +294,7 @@ func (p *Parser) ScanNodePattern() (*NodePattern, error) {
 	}
 
 	if tok, pos, lit := p.ScanIgnoreWhitespace(); tok == RPAREN {
+		fmt.Printf("Parsed Node: Variable=%v, Labels=%v, Properties=%v\n", node.Variable, node.Labels, node.Properties)
 		return &node, nil
 	} else if validNode && tok != RPAREN {
 		// We need to close the node definition
@@ -327,52 +311,127 @@ func (p *Parser) ScanEdgePattern() (*EdgePattern, error) {
 		Direction: EdgeUndefined,
 	}
 
-	// 扫描方向符号
-	tok, _, _ := p.ScanIgnoreWhitespace()
-	switch tok {
-	case EDGE_RIGHT:
-		ep.Direction = EdgeRight
-	case EDGE_LEFT:
-		ep.Direction = EdgeLeft
-	default:
-		p.Unscan() // 非方向符号，回退
-	}
-
-	// 解析边内容 [*...]
-	if tok, _, _ := p.ScanIgnoreWhitespace(); tok == LBRACKET {
-		// 处理可变长度跳数 [*]
-		if tokStar, _, _ := p.ScanIgnoreWhitespace(); tokStar == MUL {
-			ep.MinHops = new(int)
-			*ep.MinHops = 0
-
-			// 处理跳数范围 [*1..3]
-			if tokDot, _, _ := p.ScanIgnoreWhitespace(); tokDot == DOUBLEDOT {
-				// 解析 min 和 max
-				minTok, _, minLit := p.ScanIgnoreWhitespace()
-				if minTok == INTEGER {
-					min, _ := strconv.Atoi(minLit)
-					*ep.MinHops = min
-				}
-
-				if tokDot2, _, _ := p.ScanIgnoreWhitespace(); tokDot2 == DOUBLEDOT {
-					maxTok, _, maxLit := p.ScanIgnoreWhitespace()
-					if maxTok == INTEGER {
-						max, _ := strconv.Atoi(maxLit)
-						ep.MaxHops = &max
-					}
-				}
+	// 扫描起始符号（- 或 <-）
+	tok1, _, _ := p.ScanIgnoreWhitespace()
+	switch tok1 {
+	case SUB:
+		tok2, pos2, lit2 := p.ScanIgnoreWhitespace()
+		switch tok2 {
+		case GT: // -> 右箭头
+			ep.Direction = EdgeRight
+		case REL_RANGE: // [*...]
+			// 处理范围并确保闭合 ]
+			if err := p.parseRelRange(ep, lit2); err != nil {
+				return nil, err
 			}
+			// 解析后续箭头
+			tok3, pos3, lit3 := p.ScanIgnoreWhitespace()
+			if tok3 == EDGE_RIGHT {
+				ep.Direction = EdgeRight
+			} else {
+				return nil, newParseError(tokstr(tok3, lit3), []string{"->"}, pos3)
+			}
+		case LBRACKET: // -[...]
+			p.Unscan() // 回退 [ 以进入 parseEdgeDetails
+			ep.Direction = EdgeRight
+			if err := p.parseEdgeDetails(ep); err != nil {
+				return nil, err
+			}
+			// 确保消费闭合的 ]
+			if tok, pos, lit := p.ScanIgnoreWhitespace(); tok != RBRACKET {
+				return nil, newParseError(tokstr(tok, lit), []string{"]"}, pos)
+			}
+			// 处理箭头
+			tok3, pos3, lit3 := p.ScanIgnoreWhitespace()
+			if tok3 == SUB {
+				tok4, pos4, lit4 := p.ScanIgnoreWhitespace()
+				if tok4 == GT {
+					ep.Direction = EdgeRight
+				} else {
+					return nil, newParseError(tokstr(tok4, lit4), []string{">"}, pos4)
+				}
+			} else {
+				return nil, newParseError(tokstr(tok3, lit3), []string{"-"}, pos3)
+			}
+		default:
+			return nil, newParseError(tokstr(tok2, lit2), []string{">", "[*"}, pos2)
 		}
-
-		// 关闭方括号
-		if tokEnd, pos, lit := p.ScanIgnoreWhitespace(); tokEnd != RBRACKET {
-			return nil, newParseError(tokstr(tokEnd, lit), []string{"]"}, pos)
-		}
-	} else {
+	case LT:
+		// 处理左箭头逻辑...
+	default:
 		p.Unscan()
+		return nil, nil
 	}
 
+	fmt.Printf("Parsed Edge: Variable=%v, Types=%v, Direction=%v, Min=%v, Max=%v\n", ep.Variable, ep.RelTypes, ep.Direction, ep.MinHops, ep.MaxHops)
 	return ep, nil
+}
+
+// parseEdgeDetails 解析方括号内的关系详情
+func (p *Parser) parseEdgeDetails(ep *EdgePattern) error {
+	// 跳过 [
+	for {
+		tok, pos, lit := p.ScanIgnoreWhitespace()
+		switch tok {
+		case IDENT: // 变量名（如 rel）
+			v := lit
+			ep.Variable = &v
+		case COLON: // 类型定义（如 :KNOWS）
+			typeTok, pos, lit := p.ScanIgnoreWhitespace()
+			if typeTok != IDENT {
+				return newParseError(tokstr(typeTok, lit), []string{"relationship type"}, pos)
+			}
+			ep.RelTypes = append(ep.RelTypes, lit)
+		case MUL: // 可变长度路径（如 *1..5）
+			if err := p.parseRelRange(ep, lit); err != nil {
+				return err
+			}
+		case LBRACE: // 属性（如 {prop: 'value'}）
+			p.Unscan()
+			props, err := p.ScanProperties()
+			if err != nil {
+				return err
+			}
+			ep.Properties = *props
+		case RBRACKET: // 结束 ]
+			return nil
+		default:
+			return newParseError(tokstr(tok, lit), []string{"identifier", "*", "}"}, pos)
+		}
+	}
+}
+
+func (p *Parser) parseRelRange(ep *EdgePattern, lit string) error {
+	// 示例：解析 "[*1..5]" → MinHops=1, MaxHops=5
+	rangeStr := strings.TrimPrefix(lit, "[*")
+	rangeStr = strings.TrimSuffix(rangeStr, "]")
+
+	parts := strings.Split(rangeStr, "..")
+	if len(parts) == 0 {
+		ep.MinHops = new(int) // 默认 0
+		ep.MaxHops = new(int) // 默认 -1（无限）
+		return nil
+	}
+
+	// 解析起始值
+	if parts[0] != "" {
+		start, _ := strconv.Atoi(parts[0])
+		ep.MinHops = &start
+	} else {
+		defaultMin := 0
+		ep.MinHops = &defaultMin
+	}
+
+	// 解析结束值
+	if len(parts) > 1 && parts[1] != "" {
+		end, _ := strconv.Atoi(parts[1])
+		ep.MaxHops = &end
+	} else {
+		defaultMax := -1 // 表示无限
+		ep.MaxHops = &defaultMax
+	}
+
+	return nil
 }
 
 // 基础表达式解析（需扩展支持更多类型）
@@ -433,10 +492,10 @@ func (p *Parser) ScanProperties() (*map[string]Expr, error) {
 	return &props, nil
 }
 
-// Scan returns the next token from the underlying scanner.
+// Scan 返回下一个标记从底层扫描器。
 func (p *Parser) Scan() (tok Token, pos Pos, lit string) { return p.s.Scan() }
 
-// ScanIgnoreWhitespace scans the next non-whitespace and non-comment token.
+// ScanIgnoreWhitespace 扫描下一个非空白和非注释的标记。
 func (p *Parser) ScanIgnoreWhitespace() (tok Token, pos Pos, lit string) {
 	for {
 		tok, pos, lit = p.Scan()
@@ -465,16 +524,8 @@ func newParseError(found string, expected []string, pos Pos) *ParseError {
 
 // Error returns the string representation of the error.
 func (e *ParseError) Error() string {
-	// 统一位置格式为 "起始行:起始列-结束行:结束列"
-	posStr := fmt.Sprintf("line %d:%d-%d:%d",
-		e.Pos.Line+1,   // 行号从1开始
-		e.Pos.Column+1, // 列号从1开始
-		e.Pos.EndLine+1,
-		e.Pos.EndColumn+1,
-	)
-
 	if e.Message != "" {
-		return fmt.Sprintf("%s at %s", e.Message, posStr)
+		return fmt.Sprintf("%s at line %d, column %d", e.Message, e.Pos.Line, e.Pos.Column)
 	}
-	return fmt.Sprintf("found %s, expected %s at %s", e.Found, strings.Join(e.Expected, ", "), posStr)
+	return fmt.Sprintf("Parse error. Found %s, expected %s at line %d, column %d", e.Found, strings.Join(e.Expected, ", "), e.Pos.Line, e.Pos.Column)
 }

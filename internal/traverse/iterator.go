@@ -12,6 +12,9 @@ type Iterator[T comparable] interface {
 
 	// Iterate 遍历序列中的所有元素，并对每个元素调用提供的回调函数。
 	Iterate(func(*graph.Node[T]) error) error
+
+	// CurDepth 获取当前遍历深度
+	CurDepth() int
 }
 
 // Direction 遍历方向枚举

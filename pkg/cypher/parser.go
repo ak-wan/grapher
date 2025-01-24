@@ -327,92 +327,48 @@ func (p *Parser) ScanEdgePattern() (*EdgePattern, error) {
 		Direction: EdgeUndefined,
 	}
 
-	// 扫描边的起始方向
-	tok1, _, _ := p.ScanIgnoreWhitespace()
-	if tok1 == SUB {
-		tok2, _, _ := p.ScanIgnoreWhitespace()
-		if tok2 == GT {
-			ep.Direction = EdgeRight
-		} else {
-			p.Unscan()
-			ep.Direction = EdgeUndefined
-		}
-	} else if tok1 == LT {
-		tok2, _, _ := p.ScanIgnoreWhitespace()
-		if tok2 == SUB {
-			ep.Direction = EdgeLeft
-		} else {
-			p.Unscan()
-			return nil, newParseError("", []string{"-"}, Pos{})
-		}
-	} else {
-		p.Unscan()
-		return nil, nil
-	}
-
-	// 检查是否有方括号
-	if tok, _, _ := p.ScanIgnoreWhitespace(); tok != LBRACKET {
-		p.Unscan()
-		return ep, nil
-	}
-
-	// 解析方括号内的内容
-	for {
-		tok, pos, lit := p.ScanIgnoreWhitespace()
-		switch tok {
-		case MUL:
-			// 处理跳数范围
-			minHops := 0
-			ep.MinHops = &minHops
-			// 检查是否有更多跳数定义
-			nextTok, _, _ := p.ScanIgnoreWhitespace()
-			if nextTok == DOUBLEDOT {
-				maxTok, _, maxLit := p.ScanIgnoreWhitespace()
-				if maxTok == INTEGER {
-					max, _ := strconv.Atoi(maxLit)
-					ep.MaxHops = &max
-				}
-			} else {
-				p.Unscan()
-			}
-		case RBRACKET:
-			// 结束方括号
-			goto endEdge
-		case IDENT:
-			// 变量名
-			v := lit
-			ep.Variable = &v
-		case COLON:
-			// 标签
-			labelTok, _, labelLit := p.ScanIgnoreWhitespace()
-			if labelTok == IDENT {
-				ep.Labels = append(ep.Labels, labelLit)
-			} else {
-				return nil, newParseError(tokstr(labelTok, labelLit), []string{"label"}, pos)
-			}
-		default:
-			// 其他情况（如属性）
-			p.Unscan()
-			props, err := p.ScanProperties()
-			if err != nil {
-				return nil, err
-			}
-			if props != nil {
-				ep.Properties = *props
-			}
-		}
-	}
-
-endEdge:
-	// 处理边的结束方向
-	tok3, _, _ := p.ScanIgnoreWhitespace()
-	tok4, _, _ := p.ScanIgnoreWhitespace()
-	if (tok3 == SUB && tok4 == GT) && ep.Direction == EdgeUndefined {
+	// 扫描方向符号
+	tok, _, _ := p.ScanIgnoreWhitespace()
+	switch tok {
+	case EDGE_RIGHT:
 		ep.Direction = EdgeRight
-	} else if (tok3 == LT && tok4 == SUB) && ep.Direction == EdgeUndefined {
+	case EDGE_LEFT:
 		ep.Direction = EdgeLeft
+	default:
+		p.Unscan() // 非方向符号，回退
+	}
+
+	// 解析边内容 [*...]
+	if tok, _, _ := p.ScanIgnoreWhitespace(); tok == LBRACKET {
+		// 处理可变长度跳数 [*]
+		if tokStar, _, _ := p.ScanIgnoreWhitespace(); tokStar == MUL {
+			ep.MinHops = new(int)
+			*ep.MinHops = 0
+
+			// 处理跳数范围 [*1..3]
+			if tokDot, _, _ := p.ScanIgnoreWhitespace(); tokDot == DOUBLEDOT {
+				// 解析 min 和 max
+				minTok, _, minLit := p.ScanIgnoreWhitespace()
+				if minTok == INTEGER {
+					min, _ := strconv.Atoi(minLit)
+					*ep.MinHops = min
+				}
+
+				if tokDot2, _, _ := p.ScanIgnoreWhitespace(); tokDot2 == DOUBLEDOT {
+					maxTok, _, maxLit := p.ScanIgnoreWhitespace()
+					if maxTok == INTEGER {
+						max, _ := strconv.Atoi(maxLit)
+						ep.MaxHops = &max
+					}
+				}
+			}
+		}
+
+		// 关闭方括号
+		if tokEnd, pos, lit := p.ScanIgnoreWhitespace(); tokEnd != RBRACKET {
+			return nil, newParseError(tokstr(tokEnd, lit), []string{"]"}, pos)
+		}
 	} else {
-		p.Unscan()
 		p.Unscan()
 	}
 
@@ -509,8 +465,16 @@ func newParseError(found string, expected []string, pos Pos) *ParseError {
 
 // Error returns the string representation of the error.
 func (e *ParseError) Error() string {
+	// 统一位置格式为 "起始行:起始列-结束行:结束列"
+	posStr := fmt.Sprintf("line %d:%d-%d:%d",
+		e.Pos.Line+1,   // 行号从1开始
+		e.Pos.Column+1, // 列号从1开始
+		e.Pos.EndLine+1,
+		e.Pos.EndColumn+1,
+	)
+
 	if e.Message != "" {
-		return fmt.Sprintf("%s at line %d, char %d", e.Message, e.Pos.Line+1, e.Pos.Char+1)
+		return fmt.Sprintf("%s at %s", e.Message, posStr)
 	}
-	return fmt.Sprintf("found %s, expected %s at line %d, char %d", e.Found, strings.Join(e.Expected, ", "), e.Pos.Line+1, e.Pos.Char+1)
+	return fmt.Sprintf("found %s, expected %s at %s", e.Found, strings.Join(e.Expected, ", "), posStr)
 }

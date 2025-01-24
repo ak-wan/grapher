@@ -11,6 +11,7 @@ const (
 	EOF
 	WS
 	COMMENT
+	REL_RANGE
 
 	literalBeg
 	// 字面量标记
@@ -48,17 +49,19 @@ const (
 	NOT // NOT
 	operatorEnd
 
-	LPAREN    // (
-	RPAREN    // )
-	LBRACE    // {
-	RBRACE    // }
-	LBRACKET  // [
-	RBRACKET  // ]
-	COMMA     // ,
-	COLON     // :
-	SEMICOLON // ;
-	DOT       // .
-	DOUBLEDOT // ..
+	LPAREN     // (
+	RPAREN     // )
+	LBRACE     // {
+	RBRACE     // }
+	LBRACKET   // [
+	RBRACKET   // ]
+	COMMA      // ,
+	COLON      // :
+	SEMICOLON  // ;
+	DOT        // .
+	DOUBLEDOT  // ..
+	EDGE_RIGHT // ->
+	EDGE_LEFT  // <-
 
 	keywordBeg
 	// 关键字标记
@@ -112,9 +115,10 @@ const (
 )
 
 var tokens = [...]string{
-	ILLEGAL: "ILLEGAL",
-	EOF:     "EOF",
-	WS:      "WS",
+	ILLEGAL:   "ILLEGAL",
+	EOF:       "EOF",
+	WS:        "WS",
+	REL_RANGE: "REL_RANGE",
 
 	IDENT:  "IDENT",
 	NUMBER: "NUMBER",
@@ -141,16 +145,19 @@ var tokens = [...]string{
 	GT:  ">",
 	GTE: ">=",
 
-	LPAREN:    "(",
-	RPAREN:    ")",
-	LBRACE:    "{",
-	RBRACE:    "}",
-	LBRACKET:  "[",
-	RBRACKET:  "]",
-	COMMA:     ",",
-	COLON:     ":",
-	SEMICOLON: ";",
-	DOT:       ".",
+	LPAREN:     "(",
+	RPAREN:     ")",
+	LBRACE:     "{",
+	RBRACE:     "}",
+	LBRACKET:   "[",
+	RBRACKET:   "]",
+	COMMA:      ",",
+	COLON:      ":",
+	SEMICOLON:  ";",
+	DOT:        ".",
+	DOUBLEDOT:  "..",
+	EDGE_RIGHT: "->",
+	EDGE_LEFT:  "<-",
 
 	ADD:        "ADD",
 	ALL:        "ALL",
@@ -244,7 +251,22 @@ func Lookup(ident string) Token {
 // Pos specifies the line and character position of a token.
 // The Char and Line are both zero-based indexes.
 type Pos struct {
-	Line int
-	Char int
+	Line      int // 当前行号（从1开始）
+	Column    int // 当前列号（从1开始）
+	Offset    int // 字节偏移量（从0开始）
+	EndLine   int
+	EndColumn int
+	EndOffset int
 }
 
+// mergePos 合并两个连续字符的位置范围
+func mergePos(start, end Pos) Pos {
+	return Pos{
+		Line:      start.Line,
+		Column:    start.Column,
+		Offset:    start.Offset,
+		EndLine:   end.Line,
+		EndColumn: end.Column + 1, // 结束列是 ] 的下一个位置
+		EndOffset: end.Offset + 1,
+	}
+}

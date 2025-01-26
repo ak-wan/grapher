@@ -7,30 +7,31 @@ import (
 	"strings"
 )
 
-// Parser represents a Cypher parser.
+// Parser 表示 Cypher 解析器
 type Parser struct {
 	s *bufScanner
 }
 
-// NewParser returns a new instance of Parser.
+// NewParser 返回一个新的 Parser 实例
 func NewParser(r io.Reader) *Parser {
 	return &Parser{s: newBufScanner(r)}
 }
 
-// ParseQuery parses a query string and returns its AST representation.
+// ParseQuery 解析查询字符串并返回其抽象语法树表示
 func ParseQuery(s string) (Query, error) {
 	return NewParser(strings.NewReader(s)).ParseQuery()
 }
 
-// ParseQuery parses a Cypher string and returns a Query AST object.
+// ParseQuery 解析 Cypher 字符串并返回 Query 抽象语法树对象
 func (p *Parser) ParseQuery() (q Query, err error) {
 	for {
+		// 扫描到文件末尾时返回
 		if tok, _, _ := p.ScanIgnoreWhitespace(); tok == EOF {
 			return q, nil
 		} else if tok == SEMICOLON {
-			continue
+			continue // 跳过分号
 		} else {
-			p.Unscan()
+			p.Unscan() // 回退当前标记
 			q.Root, err = p.ParseSingleQuery()
 			if err != nil {
 				return q, err
@@ -150,22 +151,23 @@ func (p *Parser) ParseSingleQuery() (*SingleQuery, error) {
 	return sq, nil
 }
 
-// ScanReadingClause ...
+// ScanReadingClause 扫描读取子句（MATCH/OPTIONAL MATCH）
 func (p *Parser) ScanReadingClause() (*ReadingClause, error) {
 	rc := &ReadingClause{}
 
-	// might be optionally matching this
+	// 检查是否是 OPTIONAL MATCH
 	if tok, _, _ := p.ScanIgnoreWhitespace(); tok == OPTIONAL {
 		rc.OptionalMatch = true
 	} else {
 		p.Unscan()
 	}
 
-	// MATCH is obligatory here
+	// MATCH 是必须的关键字
 	if tok, pos, lit := p.ScanIgnoreWhitespace(); tok != MATCH {
 		return nil, newParseError(tokstr(tok, lit), []string{"MATCH"}, pos)
 	}
 
+	// 解析匹配模式列表
 	for {
 		mp, err := p.ScanMatchPattern()
 		if err != nil {
@@ -173,13 +175,14 @@ func (p *Parser) ScanReadingClause() (*ReadingClause, error) {
 		}
 		rc.Pattern = append(rc.Pattern, *mp)
 
+		// 检查是否有更多模式
 		if tok, _, _ := p.ScanIgnoreWhitespace(); tok != COMMA {
 			p.Unscan()
 			break
 		}
 	}
 
-	// might be optional WHERE
+	// 处理可选的 WHERE 条件
 	if tok, _, _ := p.ScanIgnoreWhitespace(); tok == WHERE {
 		exp, err := p.ScanExpression()
 		if err != nil {
@@ -193,12 +196,13 @@ func (p *Parser) ScanReadingClause() (*ReadingClause, error) {
 	return rc, nil
 }
 
-// ScanMatchPattern ...
+// ScanMatchPattern 扫描匹配模式
 func (p *Parser) ScanMatchPattern() (*MatchPattern, error) {
 	mp := &MatchPattern{}
 
+	// 解析模式变量赋值（如 path = (a)-[...]->(b)）
 	if tok, _, lit := p.ScanIgnoreWhitespace(); tok == IDENT {
-		// We need the `=` character here
+		// 需要等号标识符
 		if tok1, pos, lit1 := p.ScanIgnoreWhitespace(); tok1 != EQ {
 			return nil, newParseError(tokstr(tok1, lit1), []string{"="}, pos)
 		}
@@ -209,7 +213,7 @@ func (p *Parser) ScanMatchPattern() (*MatchPattern, error) {
 		p.Unscan()
 	}
 
-	// scan the pattern itself
+	// 扫描模式元素
 	elems, err := p.ScanPatternElements()
 	if err != nil {
 		return nil, err
@@ -254,15 +258,16 @@ func (p *Parser) ScanPatternElements() ([]PatternElement, error) {
 	return elements, nil
 }
 
-// ScanNodePattern returns a NodePattern if possible to consume a complete valid node.
+// ScanNodePattern 扫描节点模式（如 (a:Person {name: 'Alice'}））
 func (p *Parser) ScanNodePattern() (*NodePattern, error) {
 	if tok, _, _ := p.ScanIgnoreWhitespace(); tok != LPAREN {
-		// We already know we cannot consume a valid node if the pattern doesn't start with `(`
 		p.Unscan()
 		return nil, nil
 	}
 	var validNode bool
 	var node NodePattern
+
+	// 解析变量名
 	if tok, _, lit := p.ScanIgnoreWhitespace(); tok == IDENT {
 		v := Variable(lit)
 		node.Variable = &v
@@ -271,6 +276,7 @@ func (p *Parser) ScanNodePattern() (*NodePattern, error) {
 		p.Unscan()
 	}
 
+	// 解析标签列表
 	for {
 		if tok, _, _ := p.ScanIgnoreWhitespace(); tok == COLON {
 			if tok1, pos, lit := p.ScanIgnoreWhitespace(); tok1 == IDENT {
@@ -285,6 +291,7 @@ func (p *Parser) ScanNodePattern() (*NodePattern, error) {
 		}
 	}
 
+	// 解析属性
 	props, err := p.ScanProperties()
 	if err != nil {
 		return nil, err
@@ -293,19 +300,19 @@ func (p *Parser) ScanNodePattern() (*NodePattern, error) {
 		validNode = true
 	}
 
+	// 检查闭合括号
 	if tok, pos, lit := p.ScanIgnoreWhitespace(); tok == RPAREN {
-		fmt.Printf("Parsed Node: Variable=%v, Labels=%v, Properties=%v\n", node.Variable, node.Labels, node.Properties)
 		return &node, nil
 	} else if validNode && tok != RPAREN {
-		// We need to close the node definition
 		return nil, newParseError(tokstr(tok, lit), []string{")"}, pos)
 	}
 
 	p.Unscan()
-	p.Unscan() // unscan the first LPAREN then
+	p.Unscan() // 回退到起始括号
 	return nil, nil
 }
 
+// ScanEdgePattern 扫描边模式（如 -[r:KNOWS {since: 2010}]->）
 func (p *Parser) ScanEdgePattern() (*EdgePattern, error) {
 	ep := &EdgePattern{
 		Direction: EdgeUndefined,
@@ -315,6 +322,8 @@ func (p *Parser) ScanEdgePattern() (*EdgePattern, error) {
 	tok1, _, _ := p.ScanIgnoreWhitespace()
 	switch tok1 {
 	case SUB:
+		// 处理右箭头逻辑...
+
 		tok2, pos2, lit2 := p.ScanIgnoreWhitespace()
 		switch tok2 {
 		case GT: // -> 右箭头
@@ -401,8 +410,8 @@ func (p *Parser) parseEdgeDetails(ep *EdgePattern) error {
 	}
 }
 
+// parseRelRange 解析关系范围（如 [*1..5]）
 func (p *Parser) parseRelRange(ep *EdgePattern, lit string) error {
-	// 示例：解析 "[*1..5]" → MinHops=1, MaxHops=5
 	rangeStr := strings.TrimPrefix(lit, "[*")
 	rangeStr = strings.TrimSuffix(rangeStr, "]")
 
@@ -417,26 +426,19 @@ func (p *Parser) parseRelRange(ep *EdgePattern, lit string) error {
 	if parts[0] != "" {
 		start, _ := strconv.Atoi(parts[0])
 		ep.MinHops = &start
-	} else {
-		defaultMin := 0
-		ep.MinHops = &defaultMin
 	}
 
 	// 解析结束值
 	if len(parts) > 1 && parts[1] != "" {
 		end, _ := strconv.Atoi(parts[1])
 		ep.MaxHops = &end
-	} else {
-		defaultMax := -1 // 表示无限
-		ep.MaxHops = &defaultMax
 	}
 
 	return nil
 }
 
-// 基础表达式解析（需扩展支持更多类型）
+// ScanExpression 扫描表达式（基础实现）
 func (p *Parser) ScanExpression() (Expr, error) {
-	// 当前简化实现，需根据实际情况扩展
 	tok, pos, lit := p.ScanIgnoreWhitespace()
 	switch tok {
 	case IDENT:
@@ -451,6 +453,7 @@ func (p *Parser) ScanExpression() (Expr, error) {
 	}
 }
 
+// ScanProperties 扫描属性键值对
 func (p *Parser) ScanProperties() (*map[string]Expr, error) {
 	if tok, _, _ := p.ScanIgnoreWhitespace(); tok != LBRACE {
 		p.Unscan()
@@ -485,6 +488,7 @@ func (p *Parser) ScanProperties() (*map[string]Expr, error) {
 		}
 	}
 
+	// 闭合大括号
 	if tok, pos, lit := p.ScanIgnoreWhitespace(); tok != RBRACE {
 		return nil, newParseError(tokstr(tok, lit), []string{"}"}, pos)
 	}
@@ -492,10 +496,10 @@ func (p *Parser) ScanProperties() (*map[string]Expr, error) {
 	return &props, nil
 }
 
-// Scan 返回下一个标记从底层扫描器。
+// Scan 返回下一个标记
 func (p *Parser) Scan() (tok Token, pos Pos, lit string) { return p.s.Scan() }
 
-// ScanIgnoreWhitespace 扫描下一个非空白和非注释的标记。
+// ScanIgnoreWhitespace 扫描下一个非空白标记
 func (p *Parser) ScanIgnoreWhitespace() (tok Token, pos Pos, lit string) {
 	for {
 		tok, pos, lit = p.Scan()
@@ -506,10 +510,10 @@ func (p *Parser) ScanIgnoreWhitespace() (tok Token, pos Pos, lit string) {
 	}
 }
 
-// Unscan pushes the previously read token back onto the buffer.
+// Unscan 回退上一个扫描的标记
 func (p *Parser) Unscan() { p.s.Unscan() }
 
-// ParseError represents an error that occurred during parsing.
+// ParseError 表示解析过程中发生的错误
 type ParseError struct {
 	Message  string
 	Found    string
@@ -517,12 +521,12 @@ type ParseError struct {
 	Pos      Pos
 }
 
-// newParseError returns a new instance of ParseError.
+// newParseError 创建新的解析错误实例
 func newParseError(found string, expected []string, pos Pos) *ParseError {
 	return &ParseError{Found: found, Expected: expected, Pos: pos}
 }
 
-// Error returns the string representation of the error.
+// Error 返回错误信息字符串
 func (e *ParseError) Error() string {
 	if e.Message != "" {
 		return fmt.Sprintf("%s at line %d, column %d", e.Message, e.Pos.Line, e.Pos.Column)

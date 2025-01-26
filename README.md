@@ -19,14 +19,15 @@ The entire project is built using Copilot, and the following features are not gu
 
 ### Query Layer
 - **Cypher-like Engine**  
-  🚧 Pattern matching & path queries  
+  ✅ Pattern matching & path queries  
   🚧 Built-in indexing
 - **OrientSQL Adapter**  
   🚧 SQL-Like matching
 
 ### Algorithms
 - **Traversal**   
-  ✅ BFS/DFS (WIP)  
+  ✅ BFS
+  🚧 DFS 
   🚧 Shortest path
 
 ## Quick Start

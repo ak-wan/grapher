@@ -3,6 +3,7 @@ package graph
 
 import (
 	"errors"
+	"math/rand"
 	"os"
 	"sync"
 	"testing"
@@ -14,6 +15,13 @@ func TestGraph(t *testing.T) {
 	t.Run("并发", testConcurrency)
 	t.Run("持久化", testPersistence)
 	t.Run("混合读写", testMixedConcurrency)
+}
+
+// 基准测试组
+func BenchmarkGraph(b *testing.B) {
+	b.Run("添加节点", benchmarkAddNode)
+	b.Run("添加边", benchmarkAddEdge)
+	b.Run("随机任务", benchmarkMixedWorkload)
 }
 
 // 节点操作测试（已适配新结构）
@@ -220,6 +228,71 @@ func testPersistence(t *testing.T) {
 		err := orig.LoadFromFile("non_existent.json")
 		if err == nil {
 			t.Error("Expected error for missing file")
+		}
+	})
+}
+
+// 基准测试：单线程添加节点
+func benchmarkAddNode(b *testing.B) {
+	g := New[string]()
+	properties := map[string]string{"type": "test"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := string(rune(i % 1000)) // 限制ID范围模拟更新操作
+		_ = g.AddNode(id, properties)
+	}
+}
+
+// 基准测试：单线程添加边
+func benchmarkAddEdge(b *testing.B) {
+	g := New[int]()
+	nodes := 1000
+	for i := 0; i < nodes; i++ {
+		g.AddNode(string(rune(i)), map[string]int{})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		from := string(rune(rand.Intn(nodes)))
+		to := string(rune(rand.Intn(nodes)))
+		_ = g.AddEdge(from, to, 1)
+	}
+}
+
+// 基准测试：混合工作负载
+func benchmarkMixedWorkload(b *testing.B) {
+	g := New[string]()
+	var mu sync.Mutex
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		opCounter := 0
+		for pb.Next() {
+			opCounter++
+			id := string(rune(rand.Intn(1000)))
+
+			// 混合操作类型
+			switch opCounter % 4 {
+			case 0:
+				mu.Lock()
+				_ = g.AddNode(id, map[string]string{"id": id})
+				mu.Unlock()
+			case 1:
+				mu.Lock()
+				_, _ = g.GetNode(id)
+				mu.Unlock()
+			case 2:
+				mu.Lock()
+				_ = g.RemoveNode(id)
+				mu.Unlock()
+			case 3:
+				from := string(rune(rand.Intn(1000)))
+				to := string(rune(rand.Intn(1000)))
+				mu.Lock()
+				_ = g.AddEdge(from, to, 1.0)
+				mu.Unlock()
+			}
 		}
 	})
 }

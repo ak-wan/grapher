@@ -1,32 +1,36 @@
-// traverse/dfs_test.go
 package traverse
 
 import (
+	"errors"
 	"grapher/internal/graph"
 	"testing"
 )
 
 func TestDFS(t *testing.T) {
-	t.Run("测试完整向下遍历所有节点", TestDFSOutgoingFull)
-	t.Run("测试逆向遍历链路", TestDFSIncomingPath)
-	t.Run("验证最大深度控制逻辑", TestDFSWithMaxDepth)
-	t.Run("测试无效节点等异常场景", TestDFSErrorCases)
+	t.Run("基础遍历", TestDFSBasic)
+	t.Run("逆向遍历", TestDFSIncoming)
+	t.Run("深度限制", TestDFSWithMaxDepth)
+	t.Run("条件遍历", TestRangeTraversal)
+	t.Run("错误处理", TestDFSErrorCases)
 }
 
-// 构建测试用图结构
-// A -> D -> E
-// |    ^    |
-// v    |    v
-// B -> C -> F
-func buildTestGraph() *graph.Graph[string] {
+// 构建增强版测试图，包含属性
+func buildEnhancedGraph() *graph.Graph[string] {
 	g := graph.New[string]()
 
-	// 添加节点
-	for _, id := range []string{"A", "B", "C", "D", "E", "F"} {
-		g.AddNode(id, id)
+	nodes := map[string]map[string]string{
+		"A": {"type": "start", "group": "1"},
+		"B": {"type": "middle", "group": "1"},
+		"C": {"type": "middle", "group": "2"},
+		"D": {"type": "middle", "group": "2"},
+		"E": {"type": "end", "group": "3"},
+		"F": {"type": "end", "group": "3"},
 	}
 
-	// 添加边
+	for id, props := range nodes {
+		g.AddNode(id, props)
+	}
+
 	edges := []struct{ from, to string }{
 		{"A", "B"}, {"A", "D"},
 		{"B", "C"},
@@ -40,44 +44,9 @@ func buildTestGraph() *graph.Graph[string] {
 	return g
 }
 
-// 验证切片是否包含所有元素
-func containsAll(got, want []string) bool {
-	m := make(map[string]bool, len(got))
-	for _, v := range got {
-		m[v] = true
-	}
-	for _, v := range want {
-		if !m[v] {
-			return false
-		}
-	}
-	return true
-}
-
-// 验证切片顺序是否匹配任一有效路径
-func isValidDFSPath(got []string, validPaths [][]string) bool {
-	for _, path := range validPaths {
-		if len(got) != len(path) {
-			continue
-		}
-		match := true
-		for i := range got {
-			if got[i] != path[i] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
-
-func TestDFSOutgoingFull(t *testing.T) {
-	g := buildTestGraph()
+func TestDFSBasic(t *testing.T) {
+	g := buildEnhancedGraph()
 	iter, err := NewDFS(g, "A")
-
 	if err != nil {
 		t.Fatalf("创建迭代器失败: %v", err)
 	}
@@ -89,23 +58,36 @@ func TestDFSOutgoingFull(t *testing.T) {
 	})
 
 	// 验证访问所有节点
-	if !containsAll(result, []string{"A", "B", "C", "D", "E", "F"}) {
-		t.Errorf("未访问所有节点, 结果: %v", result)
+	expected := map[string]bool{"A": true, "B": true, "C": true, "D": true, "E": true, "F": true}
+	for _, id := range result {
+		delete(expected, id)
+	}
+	if len(expected) > 0 {
+		t.Errorf("未访问所有节点，缺失: %v", expected)
 	}
 
-	// 验证可能的DFS顺序
-	validPaths := [][]string{
-		{"A", "D", "E", "F", "B", "C"},
+	// 验证DFS基本特性（深度优先）
+	validOrders := []struct {
+		path []string
+	}{
+		{[]string{"A", "D", "E", "F", "B", "C"}},
+		{[]string{"A", "B", "C", "D", "E", "F"}},
 	}
-
-	if !isValidDFSPath(result, validPaths) {
+	match := false
+	for _, vo := range validOrders {
+		if isPathEqual(result, vo.path) {
+			match = true
+			break
+		}
+	}
+	if !match {
 		t.Errorf("无效的DFS顺序: %v", result)
 	}
 }
 
-func TestDFSIncomingPath(t *testing.T) {
-	g := buildTestGraph()
-	iter, err := NewDFS[string](g, "F", WithDirection[string](Incoming), WithMaxDepth[string](2))
+func TestDFSIncoming(t *testing.T) {
+	g := buildEnhancedGraph()
+	iter, err := NewDFS(g, "F", WithDirection[string](Incoming))
 	if err != nil {
 		t.Fatalf("创建迭代器失败: %v", err)
 	}
@@ -116,23 +98,26 @@ func TestDFSIncomingPath(t *testing.T) {
 		return nil
 	})
 
-	expected := []string{"F", "C", "E", "B", "D"}
-	if !containsAll(result, expected) {
-		t.Errorf("缺少预期节点, 结果: %v", result)
-	}
-
+	// 验证逆向路径
 	validPaths := [][]string{
-		{"F", "E", "D", "C", "B"},
-		{"F", "C", "B", "E", "D"},
+		{"F", "E", "D", "C", "B", "A"},
+		{"F", "C", "B", "A", "E", "D"},
 	}
-	if !isValidDFSPath(result, validPaths) {
+	valid := false
+	for _, path := range validPaths {
+		if isPathEqual(result, path) {
+			valid = true
+			break
+		}
+	}
+	if !valid {
 		t.Errorf("无效的逆向路径: %v", result)
 	}
 }
 
 func TestDFSWithMaxDepth(t *testing.T) {
-	g := buildTestGraph()
-	iter, err := NewDFS[string](g, "A", WithMaxDepth[string](2)) // 允许深度 0~2
+	g := buildEnhancedGraph()
+	iter, err := NewDFS(g, "A", WithMaxDepth[string](2))
 	if err != nil {
 		t.Fatalf("创建迭代器失败: %v", err)
 	}
@@ -143,36 +128,198 @@ func TestDFSWithMaxDepth(t *testing.T) {
 		return nil
 	})
 
-	// 正确的结果应包含 A(0), B(1), D(1), C(2), E(2)
-	expectedNodes := []string{"A", "B", "D", "C", "E"}
-	if !containsAll(result, expectedNodes) {
-		t.Errorf("节点缺失，期望 %v，实际 %v", expectedNodes, result)
-	}
-
-	// 验证不包含深度超过 2 的节点（如 F）
+	// 验证深度限制
+	allowed := map[string]bool{"A": true, "B": true, "D": true, "C": true, "E": true}
 	for _, id := range result {
+		if !allowed[id] {
+			t.Errorf("出现超出深度的节点: %s", id)
+		}
 		if id == "F" {
-			t.Errorf("包含超出深度的节点: F")
+			t.Error("不应包含深度3的节点F")
 		}
 	}
 }
 
+// 新增辅助函数验证子路径
+func isSubPath(got []string, validPaths [][]string) bool {
+NEXT_PATH:
+	for _, path := range validPaths {
+		if len(got) > len(path) {
+			continue
+		}
+		for i := range got {
+			if got[i] != path[i] {
+				continue NEXT_PATH
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func TestDFSErrorCases(t *testing.T) {
-	// 测试无效节点
-	t.Run("InvalidStartNode", func(t *testing.T) {
-		g := buildTestGraph()
+	g := buildEnhancedGraph()
+
+	t.Run("无效起点", func(t *testing.T) {
 		_, err := NewDFS(g, "X")
-		if err == nil {
-			t.Error("预期错误未发生")
+		if !errors.Is(err, graph.ErrNodeNotFound) {
+			t.Errorf("预期错误 %v, 实际 %v", graph.ErrNodeNotFound, err)
 		}
 	})
 
-	// 测试空图
-	t.Run("EmptyGraph", func(t *testing.T) {
-		g := graph.New[string]()
-		_, err := NewDFS(g, "A")
+	t.Run("遍历中断", func(t *testing.T) {
+		iter, _ := NewDFS(g, "A")
+		err := iter.Iterate(func(n *graph.Node[string]) error {
+			return errors.New("模拟错误")
+		})
 		if err == nil {
-			t.Error("空图应返回错误")
+			t.Error("预期错误未返回")
 		}
 	})
+}
+
+// 辅助函数
+func isPathEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func isUnorderedEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int)
+	for _, s := range a {
+		counts[s]++
+	}
+	for _, s := range b {
+		if counts[s] == 0 {
+			return false
+		}
+		counts[s]--
+	}
+	return true
+}
+
+// 新增缺失的验证函数
+func isValidDFSPath(got []string, validPaths [][]string) bool {
+	for _, path := range validPaths {
+		if isPathEqual(got, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// 更新后的测试用例
+func TestRangeTraversal(t *testing.T) {
+	g := buildEnhancedGraph()
+
+	t.Run("简单范围遍历-A到C", func(t *testing.T) {
+		iter, _ := NewDFS(g, "A",
+			WithRangeFilter(
+				func(n *graph.Node[string]) bool { return n.ID == "A" },
+				func(n *graph.Node[string]) bool { return n.ID == "C" },
+			),
+			WithDirection[string](Outgoing),
+		)
+
+		var result []string
+		iter.Iterate(func(n *graph.Node[string]) error {
+			result = append(result, n.ID)
+			return nil
+		})
+
+		// 定义有效路径集合
+		validPaths := [][]string{
+			{"A", "B", "C"}, // 唯一有效路径
+		}
+
+		// 验证结果
+		if !isValidDFSPath(result, validPaths) {
+			t.Errorf("无效的DFS路径: %v", result)
+		}
+	})
+
+	t.Run("类型范围遍历-start到end", func(t *testing.T) {
+		iter, _ := NewDFS(g, "A",
+			WithRangeFilter(
+				func(n *graph.Node[string]) bool { return n.Properties["type"] == "start" },
+				func(n *graph.Node[string]) bool { return n.Properties["type"] == "end" },
+			),
+			WithDirection[string](Outgoing),
+		)
+
+		var result []string
+		iter.Iterate(func(n *graph.Node[string]) error {
+			result = append(result, n.ID)
+			return nil
+		})
+
+		// 定义有效路径模式
+		validPatterns := []struct {
+			required []string
+			optional []string
+		}{
+			{
+				required: []string{"A", "B", "C", "F"},
+				optional: []string{"D", "E"},
+			},
+			{
+				required: []string{"A", "D", "E", "F"},
+				optional: []string{"B", "C"},
+			},
+		}
+
+		// 验证必须包含的节点
+		requiredCheck := make(map[string]bool)
+		for _, p := range validPatterns {
+			for _, n := range p.required {
+				requiredCheck[n] = true
+			}
+		}
+		for _, n := range result {
+			delete(requiredCheck, n)
+		}
+		if len(requiredCheck) > 0 {
+			t.Errorf("缺失必要节点: %v", requiredCheck)
+		}
+
+		// 验证路径有效性
+		valid := false
+		for _, pattern := range validPatterns {
+			if hasSubsequence(result, pattern.required) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			t.Errorf("无效的路径模式: %v", result)
+		}
+	})
+}
+
+// 子序列验证（原有函数保持不变）
+func hasSubsequence(got []string, sub []string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+
+	i := 0
+	for _, v := range got {
+		if v == sub[i] {
+			i++
+			if i == len(sub) {
+				return true
+			}
+		}
+	}
+	return false
 }

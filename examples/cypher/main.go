@@ -18,7 +18,7 @@ func main() {
 	fmt.Printf("Loaded %d nodes\n", len(g.AllNodes()))
 
 	// 解析查询
-	strQuery := "MATCH (x {data: 'Node A'})-[*]->(y) RETURN x, y;"
+	strQuery := "MATCH (x {data: 'Node A'})-[*]->(y {data: 'Node C'}) RETURN y;"
 	q, err := cypher.ParseQuery(strQuery)
 	if err != nil {
 		fmt.Printf("Parse error: %s\n", err)
@@ -42,4 +42,5 @@ func main() {
 			fmt.Printf("  %s = %v\n", k, v)
 		}
 	}
+
 }

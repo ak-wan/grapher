@@ -6,6 +6,14 @@ import (
 )
 
 // 完善后的DFS实现
+// 添加过滤函数类型
+type FilterFunc[T comparable] func(*graph.Node[T]) bool
+
+type RangeFilter[T comparable] struct {
+	Start FilterFunc[T] // 起始条件
+	End   FilterFunc[T] // 终止条件
+}
+
 // 添加类型定义
 type DFSOption[T comparable] func(*DFS[T])
 
@@ -15,11 +23,13 @@ type stackItem[T any] struct {
 }
 
 type DFS[T comparable] struct {
-	graph     *graph.Graph[T]
-	stack     []stackItem[T]
-	visited   map[string]struct{}
-	direction Direction
-	maxDepth  int
+	graph       *graph.Graph[T]
+	stack       []stackItem[T]
+	visited     map[string]struct{}
+	direction   Direction
+	maxDepth    int
+	rangeFilter *RangeFilter[T] // 范围过滤器
+	inRange     bool            // 是否在有效范围内
 }
 
 // NewDFS 创建DFS迭代器
@@ -42,6 +52,13 @@ func NewDFS[T comparable](g *graph.Graph[T], startID string, opts ...DFSOption[T
 	}
 
 	return dfs, nil
+}
+
+// 新增选项函数
+func WithRangeFilter[T comparable](start, end FilterFunc[T]) DFSOption[T] {
+	return func(dfs *DFS[T]) {
+		dfs.rangeFilter = &RangeFilter[T]{Start: start, End: end}
+	}
 }
 
 // 修改选项函数签名
@@ -70,37 +87,52 @@ func (d *DFS[T]) CurDepth() int {
 	return d.stack[len(d.stack)-1].depth
 }
 
+// 修改后的Next方法
 func (d *DFS[T]) Next() *graph.Node[T] {
-	if !d.HasNext() {
-		return nil
-	}
+	for len(d.stack) > 0 {
+		currentItem := d.stack[len(d.stack)-1]
+		d.stack = d.stack[:len(d.stack)-1]
 
-	// 弹出当前节点及其深度
-	currentItem := d.stack[len(d.stack)-1]
-	d.stack = d.stack[:len(d.stack)-1]
+		if _, exists := d.visited[currentItem.node.ID]; exists {
+			continue
+		}
 
-	// 检查是否已访问
-	if _, exists := d.visited[currentItem.node.ID]; exists {
-		return d.Next()
-	}
+		d.visited[currentItem.node.ID] = struct{}{}
 
-	// 标记已访问
-	d.visited[currentItem.node.ID] = struct{}{}
-
-	// 展开邻居节点（在深度限制内）
-	if d.maxDepth < 0 || currentItem.depth < d.maxDepth {
-		neighbors := d.getNeighbors(currentItem.node)
-		for _, n := range neighbors {
-			if _, visited := d.visited[n.ID]; !visited {
-				d.stack = append(d.stack, stackItem[T]{
-					node:  n,
-					depth: currentItem.depth + 1, // 深度递增
-				})
+		// 检查范围状态
+		if d.rangeFilter != nil {
+			if !d.inRange && d.rangeFilter.Start(currentItem.node) {
+				d.inRange = true
+			}
+			if d.inRange && d.rangeFilter.End(currentItem.node) {
+				d.inRange = false
 			}
 		}
-	}
 
-	return currentItem.node
+		// 展开子节点
+		if d.maxDepth < 0 || currentItem.depth < d.maxDepth {
+			neighbors := d.getNeighbors(currentItem.node)
+			for i := len(neighbors) - 1; i >= 0; i-- {
+				n := neighbors[i]
+				if _, visited := d.visited[n.ID]; !visited {
+					d.stack = append(d.stack, stackItem[T]{
+						node:  n,
+						depth: currentItem.depth + 1,
+					})
+				}
+			}
+		}
+
+		// 返回条件判断
+		if d.rangeFilter != nil {
+			if d.inRange || d.rangeFilter.End(currentItem.node) {
+				return currentItem.node
+			}
+		} else {
+			return currentItem.node
+		}
+	}
+	return nil
 }
 
 func (d *DFS[T]) Iterate(fn func(*graph.Node[T]) error) error {

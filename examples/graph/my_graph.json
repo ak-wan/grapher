@@ -1,0 +1,79 @@
+{
+  "nodes": [
+    {
+      "id": "1",
+      "labels": null,
+      "properties": {
+        "data": "String data"
+      }
+    },
+    {
+      "id": "2",
+      "labels": null,
+      "properties": {
+        "value": 42
+      }
+    },
+    {
+      "id": "3",
+      "labels": null,
+      "properties": {
+        "name": "Complex Data",
+        "value": 100
+      }
+    },
+    {
+      "id": "4",
+      "labels": null,
+      "properties": {
+        "name": "Complex Data",
+        "value": 100
+      }
+    },
+    {
+      "id": "5",
+      "labels": null,
+      "properties": {
+        "name": "Complex Data",
+        "value": 100
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "4",
+      "to": "1",
+      "weight": 0.5
+    },
+    {
+      "from": "4",
+      "to": "5",
+      "weight": 0.5
+    },
+    {
+      "from": "5",
+      "to": "1",
+      "weight": 0.5
+    },
+    {
+      "from": "1",
+      "to": "2",
+      "weight": 1
+    },
+    {
+      "from": "2",
+      "to": "3",
+      "weight": 2.5
+    },
+    {
+      "from": "2",
+      "to": "4",
+      "weight": 2.5
+    },
+    {
+      "from": "3",
+      "to": "4",
+      "weight": 0.5
+    }
+  ]
+}

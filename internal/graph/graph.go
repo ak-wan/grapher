@@ -14,12 +14,11 @@ var (
 	ErrInvalidInput = errors.New("invalid input data")
 )
 
-// Node 表示图节点，支持泛型数据
+// Node 表示图节点，支持泛型属性值
 type Node[T any] struct {
-	ID         string `json:"id"`
-	Data       T      `json:"data"`
-	Labels     []string
-	Properties map[string]interface{}
+	ID         string       `json:"id"`
+	Labels     []string     `json:"labels"`
+	Properties map[string]T `json:"properties"`
 }
 
 // Edge 表示有向带权边
@@ -33,7 +32,7 @@ type Edge struct {
 type Graph[T any] struct {
 	mu    sync.RWMutex
 	nodes map[string]*Node[T]         // 节点存储
-	in    map[string]map[string]*Edge // 入边索引：to -> from -> Edge (新增反向索引)
+	in    map[string]map[string]*Edge // 入边索引：to -> from -> Edge
 	out   map[string]map[string]*Edge // 出边索引：from -> to -> Edge
 }
 
@@ -48,8 +47,8 @@ func New[T any]() *Graph[T] {
 
 // --- 节点操作 ---
 
-// AddNode 在图上添加节点
-func (g *Graph[T]) AddNode(id string, data T) error {
+// AddNode 添加节点（带初始化属性）
+func (g *Graph[T]) AddNode(id string, props map[string]T) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -61,7 +60,26 @@ func (g *Graph[T]) AddNode(id string, data T) error {
 		return fmt.Errorf("%w: %s", ErrNodeExists, id)
 	}
 
-	g.nodes[id] = &Node[T]{ID: id, Data: data}
+	g.nodes[id] = &Node[T]{
+		ID:         id,
+		Properties: props, // 属性直接存储
+	}
+	return nil
+}
+
+// UpdateNodeProps 更新节点属性
+func (g *Graph[T]) UpdateNodeProps(id string, props map[string]T) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	node, exists := g.nodes[id]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrNodeNotFound, id)
+	}
+
+	for k, v := range props {
+		node.Properties[k] = v
+	}
 	return nil
 }
 
@@ -74,7 +92,7 @@ func (g *Graph[T]) RemoveNode(id string) error {
 		return fmt.Errorf("%w: %s", ErrNodeNotFound, id)
 	}
 
-	// 删除所有出边
+	// 删除出边
 	for to := range g.out[id] {
 		delete(g.in[to], id)
 		if len(g.in[to]) == 0 {
@@ -83,7 +101,7 @@ func (g *Graph[T]) RemoveNode(id string) error {
 	}
 	delete(g.out, id)
 
-	// 删除所有入边
+	// 删除入边
 	for from := range g.in[id] {
 		delete(g.out[from], id)
 		if len(g.out[from]) == 0 {
@@ -96,7 +114,7 @@ func (g *Graph[T]) RemoveNode(id string) error {
 	return nil
 }
 
-//--- 边操作 ---
+// --- 边操作 ---
 
 // AddEdge 添加带权边
 func (g *Graph[T]) AddEdge(from, to string, weight float64) error {
@@ -136,6 +154,19 @@ func (g *Graph[T]) UpdateEdge(from, to string, weight float64) error {
 	return nil
 }
 
+// GetEdge 获取边
+func (g *Graph[T]) GetEdge(from, to string) (*Edge, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if edges, exists := g.out[from]; exists {
+		if edge, exists := edges[to]; exists {
+			return edge, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s->%s", ErrEdgeNotFound, from, to)
+}
+
 // RemoveEdge 移除边
 func (g *Graph[T]) RemoveEdge(from, to string) error {
 	g.mu.Lock()
@@ -158,7 +189,7 @@ func (g *Graph[T]) RemoveEdge(from, to string) error {
 	return nil
 }
 
-//--- 查询操作 ---
+// --- 查询操作 ---
 
 // GetNode 获取节点
 func (g *Graph[T]) GetNode(id string) (*Node[T], error) {
@@ -184,7 +215,21 @@ func (g *Graph[T]) AllNodes() []*Node[T] {
 	return nodes
 }
 
-// GetOutEdges 获取节点的出边
+// GetNodesByProp 根据属性查找节点
+func (g *Graph[T]) GetNodesByProp(key string, value T) []*Node[T] {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	result := make([]*Node[T], 0)
+	for _, node := range g.nodes {
+		if v, exists := node.Properties[key]; exists && any(v) == any(value) {
+			result = append(result, node)
+		}
+	}
+	return result
+}
+
+// GetOutEdges 获取出边
 func (g *Graph[T]) GetOutEdges(from string) ([]*Edge, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -194,8 +239,8 @@ func (g *Graph[T]) GetOutEdges(from string) ([]*Edge, error) {
 	}
 
 	edges := make([]*Edge, 0, len(g.out[from]))
-	for _, edge := range g.out[from] {
-		edges = append(edges, edge)
+	for _, e := range g.out[from] {
+		edges = append(edges, e)
 	}
 	return edges, nil
 }
@@ -213,7 +258,7 @@ func (g *Graph[T]) addEdgeToIndex(from, to string, edge *Edge) {
 	g.in[to][from] = edge
 }
 
-// 添加获取入边方法
+// GetInEdges 获取入边
 func (g *Graph[T]) GetInEdges(to string) ([]*Edge, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()

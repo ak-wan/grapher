@@ -4,105 +4,95 @@ import (
 	"fmt"
 	"grapher/internal/graph"
 	"grapher/internal/traverse"
+	"reflect"
 	"strconv"
 )
 
-// ExecuteQuery 执行查询并返回结果（基于DFS迭代器）
+// ExecuteQuery 支持范围过滤的查询执行（完整版）
 func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interface{}, error) {
 	results := []map[string]interface{}{}
-	sq := q.Root
-
-	// 处理MATCH子句
-	if len(sq.Reading) == 0 {
+	if len(q.Root.Reading) == 0 {
 		return nil, fmt.Errorf("no MATCH clause found")
 	}
-	matchClause := sq.Reading[0]
+	matchClause := q.Root.Reading[0]
 
-	// 解析模式中的变量绑定
+	// 确保只处理单个模式
+	if len(matchClause.Pattern) != 1 {
+		return nil, fmt.Errorf("only single pattern is supported")
+	}
+
+	// 解析模式结构 (start)-[edge]->(end)
 	var (
-		startVar    Variable
-		endVar      Variable
-		edgePattern EdgePattern
+		edge         EdgePattern
+		startPattern *NodePattern
+		endPattern   *NodePattern
 	)
 
-	// 提取模式中的节点和边信息
+	// 提取模式中的元素
 	for _, mp := range matchClause.Pattern {
-		for _, elem := range mp.Elements {
-			switch v := elem.(type) {
-			case *NodePattern:
-				if v.Variable != nil {
-					if startVar == "" {
-						startVar = *v.Variable
-					} else {
-						endVar = *v.Variable
-					}
-				}
-			case *EdgePattern:
-				edgePattern = *v
-			}
+		if len(mp.Elements) != 3 {
+			return nil, fmt.Errorf("invalid pattern structure, expected (start)-[...]->(end)")
+		}
+
+		// 解析起始节点
+		if np, ok := mp.Elements[0].(*NodePattern); ok {
+			startPattern = np
+		} else {
+			return nil, fmt.Errorf("first element must be node pattern")
+		}
+
+		// 解析边模式
+		if ep, ok := mp.Elements[1].(*EdgePattern); ok {
+			edge = *ep
+		} else {
+			return nil, fmt.Errorf("second element must be edge pattern")
+		}
+
+		// 解析终止节点
+		if np, ok := mp.Elements[2].(*NodePattern); ok {
+			endPattern = np
+		} else {
+			return nil, fmt.Errorf("third element must be node pattern")
 		}
 	}
 
 	// 查找起始节点
 	startNodes, err := findStartNodes(g, matchClause)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("start node error: %w", err)
 	}
 
 	// 遍历所有起始节点
 	for _, startNode := range startNodes {
-		// 设置深度范围
-		minHops := 1 // Cypher默认至少1跳
-		if edgePattern.MinHops != nil {
-			minHops = *edgePattern.MinHops
-		}
-		maxHops := -1
-		if edgePattern.MaxHops != nil {
-			maxHops = *edgePattern.MaxHops
+		endFilter := nodeMatchesPattern[T](endPattern)
+
+		opts := []traverse.DFSOption[T]{
+			traverse.WithDirection[T](convertDirection(edge.Direction)),
+			traverse.WithRangeFilter[T](
+				func(n *graph.Node[T]) bool { // 起始节点已经过筛选
+					return nodeMatchesPattern[T](startPattern)(n)
+				},
+				endFilter,
+			),
 		}
 
-		// 配置DFS参数
-		opts := []traverse.DFSOption[T]{ // 根据泛型类型具体化
-			traverse.WithDirection[T](convertDirection(edgePattern.Direction)),
-			traverse.WithMaxDepth[T](maxHops),
-		}
-
-		// 创建DFS迭代器
+		// 初始化DFS遍历器
 		dfs, err := traverse.NewDFS(g, startNode.ID, opts...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("DFS init failed: %w", err)
 		}
 
 		// 收集结果
-		seen := make(map[interface{}]bool)
-		err = dfs.Iterate(func(n *graph.Node[T]) error {
-			// 过滤跳数范围
-			currentDepth := dfs.CurDepth()
-			if currentDepth < minHops || (maxHops != -1 && currentDepth > maxHops) {
-				return nil
-			}
-
-			// 结果去重
-			if seen[n.Data] {
-				return nil
-			}
-			seen[n.Data] = true
-
-			// 构建结果项
-			result := make(map[string]interface{})
-			if startVar != "" {
-				result[string(startVar)] = startNode.Data
-			}
-			if endVar != "" {
-				result[string(endVar)] = n.Data
+		dfs.Iterate(func(n *graph.Node[T]) error {
+			// 构建结果记录
+			result := map[string]interface{}{
+				"ID":         n.ID,
+				"Properties": n.Properties,
 			}
 			results = append(results, result)
 			return nil
 		})
 
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return results, nil
@@ -110,11 +100,8 @@ func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interf
 
 // 辅助函数 ---------------------------------------------------
 
-// 转换方向枚举
 func convertDirection(d EdgeDirection) traverse.Direction {
 	switch d {
-	case EdgeRight:
-		return traverse.Outgoing
 	case EdgeLeft:
 		return traverse.Incoming
 	default:
@@ -122,98 +109,81 @@ func convertDirection(d EdgeDirection) traverse.Direction {
 	}
 }
 
-// 查找起始节点
 func findStartNodes[T comparable](g *graph.Graph[T], clause ReadingClause) ([]*graph.Node[T], error) {
 	if len(clause.Pattern) == 0 {
-		return nil, fmt.Errorf("no pattern found in MATCH clause")
+		return nil, fmt.Errorf("empty pattern")
 	}
 
-	// 获取第一个节点模式
 	firstElem := clause.Pattern[0].Elements[0]
-	nodePattern, ok := firstElem.(*NodePattern)
+	np, ok := firstElem.(*NodePattern)
 	if !ok {
-		return nil, fmt.Errorf("expected NodePattern as first element")
+		return nil, fmt.Errorf("first element must be node pattern")
 	}
 
-	return findNodesByPattern(g, *nodePattern)
+	fmt.Println("[DEBUG] Searching for start nodes\n", np.Properties)
+	return findNodesByPattern(g, *np)
 }
 
 func findNodesByPattern[T comparable](g *graph.Graph[T], np NodePattern) ([]*graph.Node[T], error) {
-	allNodes := g.AllNodes()
+	fmt.Printf("[DEBUG] Searching for nodes matching: %+v\n", np)
 	matched := make([]*graph.Node[T], 0)
-
-	fmt.Printf("\n[DEBUG] Matching node pattern: Labels=%v, Properties=%v\n", np.Labels, np.Properties)
-
-NODE_LOOP:
-	for _, node := range allNodes {
-		fmt.Printf("\n[DEBUG] Checking node %s:\n", node.ID)
-		fmt.Printf("  - Labels: %v\n", node.Labels)
-		fmt.Printf("  - Properties: %v\n", node.Data)
-
-		// 检查标签
-		if len(np.Labels) > 0 {
-			if !hasAllLabels(node, np.Labels) {
-				fmt.Printf("  ✗ Label mismatch\n")
-				continue
-			}
-			fmt.Printf("  ✓ Labels matched\n")
+	matcher := nodeMatchesPattern[T](&np)
+	for _, node := range g.AllNodes() {
+		if !matcher(node) {
+			continue
 		}
+		matched = append(matched, node)
+	}
+	return matched, nil
+}
 
-		// 检查属性
-		for k, expr := range np.Properties {
-			nodeVal, exists := node.Properties[k]
+func nodeMatchesPattern[T comparable](np *NodePattern) func(*graph.Node[T]) bool {
+	if np == nil {
+		return func(*graph.Node[T]) bool { return true }
+	}
+
+	return func(node *graph.Node[T]) bool {
+		// 属性匹配
+		for key, expr := range np.Properties {
+			nodeVal, exists := node.Properties[key]
 			if !exists {
-				fmt.Printf("  ✗ Property '%s' not found\n", k)
-				continue NODE_LOOP
+				return false
 			}
 
 			switch v := expr.(type) {
 			case StrLiteral:
-				expected := string(v)
-				actual := fmt.Sprint(nodeVal)
-				if actual != expected {
-					fmt.Printf("  ✗ Property '%s' value mismatch: expected '%s', got '%s'\n", k, expected, actual)
-					continue NODE_LOOP
+				if fmt.Sprint(nodeVal) != string(v) {
+					return false
 				}
-				fmt.Printf("  ✓ Property '%s' matched ('%s')\n", k, expected)
 			case IntegerLiteral:
 				expected := int(v)
-				actual, err := strconv.Atoi(fmt.Sprint(nodeVal))
-				if err != nil || actual != expected {
-					fmt.Printf("  ✗ Property '%s' value mismatch: expected %d, got %v\n", k, expected, nodeVal)
-					continue NODE_LOOP
+				// 改进类型处理逻辑
+				val := reflect.ValueOf(nodeVal)
+				switch val.Kind() {
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					if int(val.Int()) != expected {
+						return false
+					}
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					if int(val.Uint()) != expected {
+						return false
+					}
+				case reflect.Float32, reflect.Float64:
+					if int(val.Float()) != expected {
+						return false
+					}
+				case reflect.String:
+					parsed, err := strconv.Atoi(val.String())
+					if err != nil || parsed != expected {
+						return false
+					}
+				default:
+					return false
 				}
-				fmt.Printf("  ✓ Property '%s' matched (%d)\n", k, expected)
 			default:
-				fmt.Printf("  ✗ Unsupported property type: %T\n", expr)
-				continue NODE_LOOP
+				return false
 			}
 		}
-
-		matched = append(matched, node)
-		fmt.Printf("  ✓ Node matched\n")
+		return true
 	}
-
-	fmt.Printf("\n[DEBUG] Total matched nodes: %d\n", len(matched))
-	return matched, nil
-}
-
-// 标签检查
-func hasAllLabels[T comparable](n *graph.Node[T], labels []string) bool {
-	for _, l := range labels {
-		if !contains(n.Labels, l) {
-			return false
-		}
-	}
-	return true
-}
-
-// 通用包含检查
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

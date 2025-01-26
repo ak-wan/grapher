@@ -2,27 +2,39 @@
   "nodes": [
     {
       "id": "A",
-      "data": "Node A"
+      "properties": {
+        "data": "Node A"
+      }
     },
     {
       "id": "B",
-      "data": "Node B"
+      "properties": {
+        "data": "Node B"
+      }
     },
     {
       "id": "C",
-      "data": "Node C"
+      "properties": {
+        "data": "Node C"
+      }
     },
     {
       "id": "D",
-      "data": "Node D"
+      "properties": {
+        "data": "Node D"
+      }
     },
     {
       "id": "E",
-      "data": "Node E"
+      "properties": {
+        "data": "Node E"
+      }
     },
     {
       "id": "F",
-      "data": "Node F"
+      "properties": {
+        "data": "Node F"
+      }
     }
   ],
   "edges": [

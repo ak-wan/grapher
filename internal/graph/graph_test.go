@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 )
-		
+
 func TestGraph(t *testing.T) {
 	t.Run("测试操作节点", testNodeOperations)
 	t.Run("测试边操作", testEdgeOperations)
@@ -16,26 +16,26 @@ func TestGraph(t *testing.T) {
 	t.Run("混合读写", testMixedConcurrency)
 }
 
-// 节点操作测试
+// 节点操作测试（已适配新结构）
 func testNodeOperations(t *testing.T) {
 	t.Parallel()
 
 	g := New[string]()
 
 	t.Run("AddNode", func(t *testing.T) {
-		// 正常添加
-		if err := g.AddNode("A", "NodeA"); err != nil {
+		// 正常添加（使用properties参数）
+		if err := g.AddNode("A", map[string]string{"name": "NodeA"}); err != nil {
 			t.Errorf("AddNode failed: %v", err)
 		}
 
 		// 重复添加
-		err := g.AddNode("A", "NodeA")
+		err := g.AddNode("A", map[string]string{"name": "Another"})
 		if !errors.Is(err, ErrNodeExists) {
 			t.Errorf("Expected ErrNodeExists, got %v", err)
 		}
 
 		// 空ID
-		if err := g.AddNode("", "Empty"); !errors.Is(err, ErrInvalidInput) {
+		if err := g.AddNode("", map[string]string{}); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("Expected ErrInvalidInput, got %v", err)
 		}
 	})
@@ -53,25 +53,25 @@ func testNodeOperations(t *testing.T) {
 		}
 
 		// 验证关联边删除
-		g.AddNode("A", "NodeA")
-		g.AddNode("B", "NodeB")
+		g.AddNode("A", map[string]string{"name": "NodeA"})
+		g.AddNode("B", map[string]string{"name": "NodeB"})
 		g.AddEdge("A", "B", 1.0)
 		if err := g.RemoveNode("A"); err != nil {
 			t.Fatal(err)
 		}
-		if edges, _ := g.GetOutEdges("B"); len(edges) > 0 {
+		if edges, _ := g.GetOutEdges("A"); len(edges) > 0 {
 			t.Error("Related edges not cleaned up")
 		}
 	})
 }
 
-// 边操作测试
+// 边操作测试（已适配新结构）
 func testEdgeOperations(t *testing.T) {
 	t.Parallel()
 
 	g := New[string]()
-	g.AddNode("A", "")
-	g.AddNode("B", "")
+	g.AddNode("A", map[string]string{})
+	g.AddNode("B", map[string]string{})
 
 	t.Run("AddEdge", func(t *testing.T) {
 		// 正常添加
@@ -125,7 +125,7 @@ func testEdgeOperations(t *testing.T) {
 	})
 }
 
-// 并发安全测试
+// 并发安全测试（已适配新结构）
 func testConcurrency(t *testing.T) {
 	t.Parallel()
 
@@ -133,18 +133,16 @@ func testConcurrency(t *testing.T) {
 	const numNodes = 1000
 	var wg sync.WaitGroup
 
-	// 并发添加节点
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < numNodes; i++ {
-			_ = g.AddNode(string(rune(i)), i)
+			_ = g.AddNode(string(rune(i)), map[string]int{"value": i})
 		}
 	}()
 
-	wg.Wait() // 等待添加完成
+	wg.Wait()
 
-	// 并发删除节点
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -155,13 +153,12 @@ func testConcurrency(t *testing.T) {
 
 	wg.Wait()
 
-	// 验证最终状态
 	if len(g.nodes) != 0 {
 		t.Errorf("Expected empty graph, got %d nodes", len(g.nodes))
 	}
 }
 
-// 混合读写操作测试
+// 混合读写操作测试（已适配新结构）
 func testMixedConcurrency(t *testing.T) {
 	g := New[int]()
 	var wg sync.WaitGroup
@@ -171,8 +168,7 @@ func testMixedConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			// 混合操作
-			_ = g.AddNode(string(rune(id)), id)
+			_ = g.AddNode(string(rune(id)), map[string]int{"id": id})
 			_, _ = g.GetNode(string(rune(id)))
 			_ = g.RemoveNode(string(rune(id)))
 		}(i)
@@ -180,13 +176,12 @@ func testMixedConcurrency(t *testing.T) {
 
 	wg.Wait()
 
-	// 验证最终无节点残留
 	if len(g.nodes) > 0 {
 		t.Errorf("Expected empty graph, got %d nodes", len(g.nodes))
 	}
 }
 
-// 持久化测试
+// 持久化测试（已适配新结构）
 func testPersistence(t *testing.T) {
 	t.Parallel()
 
@@ -194,8 +189,8 @@ func testPersistence(t *testing.T) {
 	defer os.Remove(testFile)
 
 	orig := New[float64]()
-	orig.AddNode("A", 1.1)
-	orig.AddNode("B", 2.2)
+	orig.AddNode("A", map[string]float64{"value": 1.1})
+	orig.AddNode("B", map[string]float64{"value": 2.2})
 	orig.AddEdge("A", "B", 3.14)
 
 	t.Run("Save", func(t *testing.T) {
@@ -210,13 +205,11 @@ func testPersistence(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// 验证节点
 		nodeA, _ := loaded.GetNode("A")
-		if nodeA.Data != 1.1 {
-			t.Errorf("Expected 1.1, got %v", nodeA.Data)
+		if val, ok := nodeA.Properties["value"]; !ok || val != 1.1 {
+			t.Errorf("Expected 1.1, got %v", val)
 		}
 
-		// 验证边
 		edges, _ := loaded.GetOutEdges("A")
 		if len(edges) != 1 || edges[0].Weight != 3.14 {
 			t.Error("Edge data mismatch")

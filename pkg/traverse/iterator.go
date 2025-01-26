@@ -1,6 +1,6 @@
 package traverse
 
-import "grapher/internal/graph"
+import "grapher/pkg/graph"
 
 // Iterator 通用图遍历接口
 type Iterator[T comparable] interface {

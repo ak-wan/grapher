@@ -2,8 +2,8 @@ package cypher
 
 import (
 	"fmt"
-	"grapher/internal/graph"
-	"grapher/internal/traverse"
+	"grapher/pkg/graph"
+	"grapher/pkg/traverse"
 	"reflect"
 	"strconv"
 )

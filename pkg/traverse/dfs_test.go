@@ -2,7 +2,7 @@ package traverse
 
 import (
 	"errors"
-	"grapher/internal/graph"
+	"grapher/pkg/graph"
 	"testing"
 )
 

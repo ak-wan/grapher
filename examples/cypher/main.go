@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"grapher/internal/graph"
-	"grapher/pkg/cypher"
+	"grapher/internal/cypher"
+	"grapher/pkg/graph"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"grapher/internal/graph"
+	"grapher/pkg/graph"
 )
 
 func main() {

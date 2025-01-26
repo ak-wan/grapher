@@ -2,7 +2,7 @@ package traverse
 
 import (
 	"fmt"
-	"grapher/internal/graph"
+	"grapher/pkg/graph"
 )
 
 // 完善后的DFS实现

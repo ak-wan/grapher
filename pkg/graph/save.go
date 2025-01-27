@@ -10,20 +10,8 @@ import (
 
 // 序列化专用结构体（避免直接暴露内部结构）
 type graphDTO[T any] struct {
-	Nodes []nodeDTO[T] `json:"nodes"`
-	Edges []edgeDTO    `json:"edges"`
-}
-
-type nodeDTO[T any] struct {
-	ID         string       `json:"id"`
-	Labels     []string     `json:"labels"`
-	Properties map[string]T `json:"properties"`
-}
-
-type edgeDTO struct {
-	From   string  `json:"from"`
-	To     string  `json:"to"`
-	Weight float64 `json:"weight"`
+	Nodes []Node[T] `json:"nodes"`
+	Edges []Edge    `json:"edges"`
 }
 
 // SaveToFile 保存图数据到文件
@@ -33,13 +21,13 @@ func (g *Graph[T]) SaveToFile(filename string) error {
 
 	// 构建DTO结构
 	dto := graphDTO[T]{
-		Nodes: make([]nodeDTO[T], 0, len(g.nodes)),
-		Edges: make([]edgeDTO, 0, len(g.out)*2),
+		Nodes: make([]Node[T], 0, len(g.nodes)),
+		Edges: make([]Edge, 0, len(g.out)*2),
 	}
 
 	// 转换节点
 	for _, node := range g.nodes {
-		dto.Nodes = append(dto.Nodes, nodeDTO[T]{
+		dto.Nodes = append(dto.Nodes, Node[T]{
 			ID:         node.ID,
 			Labels:     node.Labels,
 			Properties: node.Properties,
@@ -49,7 +37,7 @@ func (g *Graph[T]) SaveToFile(filename string) error {
 	// 转换边
 	for _, edges := range g.out {
 		for _, edge := range edges {
-			dto.Edges = append(dto.Edges, edgeDTO{
+			dto.Edges = append(dto.Edges, Edge{
 				From:   edge.From,
 				To:     edge.To,
 				Weight: edge.Weight,

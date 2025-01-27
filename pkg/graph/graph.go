@@ -18,7 +18,7 @@ var (
 type Node[T any] struct {
 	ID         string       `json:"id"`
 	Labels     []string     `json:"labels"`
-	Properties map[string]T `json:"properties"`
+	Properties map[string]T `json:"props"`
 }
 
 // Edge 表示有向带权边

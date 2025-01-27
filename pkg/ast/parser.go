@@ -1,4 +1,4 @@
-package cypher
+package ast
 
 import (
 	"fmt"
@@ -17,25 +17,17 @@ func NewParser(r io.Reader) *Parser {
 	return &Parser{s: newBufScanner(r)}
 }
 
-// ParseQuery 解析查询字符串并返回其抽象语法树表示
-func ParseQuery(s string) (Query, error) {
-	return NewParser(strings.NewReader(s)).ParseQuery()
-}
-
 // ParseQuery 解析 Cypher 字符串并返回 Query 抽象语法树对象
-func (p *Parser) ParseQuery() (q Query, err error) {
+func (p *Parser) ParseQuery() (*SingleQuery, error) {
 	for {
 		// 扫描到文件末尾时返回
 		if tok, _, _ := p.ScanIgnoreWhitespace(); tok == EOF {
-			return q, nil
+			return nil, nil
 		} else if tok == SEMICOLON {
 			continue // 跳过分号
 		} else {
 			p.Unscan() // 回退当前标记
-			q.Root, err = p.ParseSingleQuery()
-			if err != nil {
-				return q, err
-			}
+			return p.ParseSingleQuery()
 		}
 	}
 }

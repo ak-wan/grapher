@@ -2,11 +2,28 @@ package cypher
 
 import (
 	"fmt"
+	"grapher/pkg/ast"
 	"grapher/pkg/graph"
 	"grapher/pkg/traverse"
 	"reflect"
 	"strconv"
+	"strings"
 )
+
+// Query 表示 Cypher 查询的根元素
+type Query struct {
+	Root *ast.SingleQuery
+}
+
+func (q Query) String() string {
+	return q.Root.String()
+}
+
+// ParseQuery 解析查询字符串并返回其抽象语法树表示
+func ParseQuery(s string) (Query, error) {
+	root, err := ast.NewParser(strings.NewReader(s)).ParseQuery()
+	return Query{Root: root}, err
+}
 
 // ExecuteQuery 支持范围过滤的查询执行（完整版）
 func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interface{}, error) {
@@ -23,9 +40,9 @@ func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interf
 
 	// 解析模式结构 (start)-[edge]->(end)
 	var (
-		edge         EdgePattern
-		startPattern *NodePattern
-		endPattern   *NodePattern
+		edge         ast.EdgePattern
+		startPattern *ast.NodePattern
+		endPattern   *ast.NodePattern
 	)
 
 	// 提取模式中的元素
@@ -35,21 +52,21 @@ func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interf
 		}
 
 		// 解析起始节点
-		if np, ok := mp.Elements[0].(*NodePattern); ok {
+		if np, ok := mp.Elements[0].(*ast.NodePattern); ok {
 			startPattern = np
 		} else {
 			return nil, fmt.Errorf("first element must be node pattern")
 		}
 
 		// 解析边模式
-		if ep, ok := mp.Elements[1].(*EdgePattern); ok {
+		if ep, ok := mp.Elements[1].(*ast.EdgePattern); ok {
 			edge = *ep
 		} else {
 			return nil, fmt.Errorf("second element must be edge pattern")
 		}
 
 		// 解析终止节点
-		if np, ok := mp.Elements[2].(*NodePattern); ok {
+		if np, ok := mp.Elements[2].(*ast.NodePattern); ok {
 			endPattern = np
 		} else {
 			return nil, fmt.Errorf("third element must be node pattern")
@@ -100,22 +117,22 @@ func ExecuteQuery[T comparable](q Query, g *graph.Graph[T]) ([]map[string]interf
 
 // 辅助函数 ---------------------------------------------------
 
-func convertDirection(d EdgeDirection) traverse.Direction {
+func convertDirection(d ast.EdgeDirection) traverse.Direction {
 	switch d {
-	case EdgeLeft:
+	case ast.EdgeLeft:
 		return traverse.Incoming
 	default:
 		return traverse.Outgoing
 	}
 }
 
-func findStartNodes[T comparable](g *graph.Graph[T], clause ReadingClause) ([]*graph.Node[T], error) {
+func findStartNodes[T comparable](g *graph.Graph[T], clause ast.ReadingClause) ([]*graph.Node[T], error) {
 	if len(clause.Pattern) == 0 {
 		return nil, fmt.Errorf("empty pattern")
 	}
 
 	firstElem := clause.Pattern[0].Elements[0]
-	np, ok := firstElem.(*NodePattern)
+	np, ok := firstElem.(*ast.NodePattern)
 	if !ok {
 		return nil, fmt.Errorf("first element must be node pattern")
 	}
@@ -124,7 +141,7 @@ func findStartNodes[T comparable](g *graph.Graph[T], clause ReadingClause) ([]*g
 	return findNodesByPattern(g, *np)
 }
 
-func findNodesByPattern[T comparable](g *graph.Graph[T], np NodePattern) ([]*graph.Node[T], error) {
+func findNodesByPattern[T comparable](g *graph.Graph[T], np ast.NodePattern) ([]*graph.Node[T], error) {
 	fmt.Printf("[DEBUG] Searching for nodes matching: %+v\n", np)
 	matched := make([]*graph.Node[T], 0)
 	matcher := nodeMatchesPattern[T](&np)
@@ -137,7 +154,7 @@ func findNodesByPattern[T comparable](g *graph.Graph[T], np NodePattern) ([]*gra
 	return matched, nil
 }
 
-func nodeMatchesPattern[T comparable](np *NodePattern) func(*graph.Node[T]) bool {
+func nodeMatchesPattern[T comparable](np *ast.NodePattern) func(*graph.Node[T]) bool {
 	if np == nil {
 		return func(*graph.Node[T]) bool { return true }
 	}
@@ -151,11 +168,11 @@ func nodeMatchesPattern[T comparable](np *NodePattern) func(*graph.Node[T]) bool
 			}
 
 			switch v := expr.(type) {
-			case StrLiteral:
+			case ast.StrLiteral:
 				if fmt.Sprint(nodeVal) != string(v) {
 					return false
 				}
-			case IntegerLiteral:
+			case ast.IntegerLiteral:
 				expected := int(v)
 				// 改进类型处理逻辑
 				val := reflect.ValueOf(nodeVal)

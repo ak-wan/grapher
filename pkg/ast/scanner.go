@@ -1,4 +1,4 @@
-package cypher
+package ast
 
 import (
 	"bufio"

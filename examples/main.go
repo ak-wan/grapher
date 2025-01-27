@@ -24,7 +24,7 @@ func main() {
 	printOutEdges(g)
 
 	fmt.Printf("%v\n", g.AllNodes())
-	g.SaveToFile("my_graph.json")
+	g.SaveToFile("graph.json")
 }
 
 func addNodes(g *graph.Graph[any]) {

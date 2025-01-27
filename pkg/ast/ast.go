@@ -1,19 +1,10 @@
-package cypher
+package ast
 
 import (
 	"bytes"
 	"fmt"
 	"strings"
 )
-
-// Query 表示 Cypher 查询的根元素
-type Query struct {
-	Root *SingleQuery
-}
-
-func (q Query) String() string {
-	return q.Root.String()
-}
 
 // SingleQuery 表示单个查询语句（如 MATCH-RETURN 结构）
 type SingleQuery struct {

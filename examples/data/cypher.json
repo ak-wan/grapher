@@ -2,37 +2,37 @@
   "nodes": [
     {
       "id": "A",
-      "properties": {
+      "props": {
         "data": "Node A"
       }
     },
     {
       "id": "B",
-      "properties": {
+      "props": {
         "data": "Node B"
       }
     },
     {
       "id": "C",
-      "properties": {
+      "props": {
         "data": "Node C"
       }
     },
     {
       "id": "D",
-      "properties": {
+      "props": {
         "data": "Node D"
       }
     },
     {
       "id": "E",
-      "properties": {
+      "props": {
         "data": "Node E"
       }
     },
     {
       "id": "F",
-      "properties": {
+      "props": {
         "data": "Node F"
       }
     }
